@@ -60,10 +60,11 @@ class RecommenderCFSimple(Recommender):
                 ratings = np.array(Ucsc[ss,u].todense())[:,0]
                 bxi = mu + bx[u] + bi
                 bxj = bxi[ss]
+
                 if self.S[:, ss].shape[1] >= k:
-                    kidx = np.argpartition(self.S[:, ss], k-1)[:,:k]
+                    kidx = np.argpartition(self.S[:, ss], self.S[:, ss].shape[1]-k+1)[:,-k:]
                     ratings = ratings[kidx]
-                    Sij = np.partition(self.S[:, ss], k-1, axis=1)[:,:k]
+                    Sij = np.partition(self.S[:, ss], self.S[:, ss].shape[1]-k+1, axis=1)[:,-k:]
                     bxj = bxj[kidx]
                     T = np.sum(np.multiply(Sij, ratings-bxj),axis=1)
                 else:
@@ -72,6 +73,7 @@ class RecommenderCFSimple(Recommender):
                 nzi = np.sum(Sij,axis=1) > 0
                 self.Ud[nzi,u] = bxi[nzi] + np.divide(T[nzi],np.sum(Sij[nzi,:], axis=1))
                 self.Ud[~nzi, u] = bxi[~nzi]
+                self.Ud[:,u] = bxi
 
         test_idx = Vcsr.nonzero()
         test_error = rmse(self.predict(test_idx[0], test_idx[1]), Vcsr[test_idx[0], test_idx[1]])
@@ -95,7 +97,7 @@ class RecommenderCFSimple(Recommender):
                 bxi = mu + bx[u] + bi
                 bxj = bxi[ss]
                 if len(self.S[i, ss]) >= k:
-                    kidx = np.argpartition(self.S[i, ss], k - 1)[:k]
+                    kidx = np.argpartition(self.S[i, ss], self.S[i, ss].shape[1]-k+1)[-k:]
                     Sij = self.S[i, ss][kidx]
                     ratings = ratings[kidx]
                     bxj = bxj[kidx]
