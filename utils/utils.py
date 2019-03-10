@@ -25,3 +25,6 @@ def df2umCSR(df, M=None, N=None):
         shape=(M, N)
     )
     return umCSR
+
+def rmse(x, y):
+    return np.sqrt(np.mean(np.power(x-y, 2)))
