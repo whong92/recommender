@@ -28,3 +28,15 @@ def df2umCSR(df, M=None, N=None):
 
 def rmse(x, y):
     return np.sqrt(np.mean(np.power(x-y, 2)))
+
+def mean_nnz(M, axis=None, mu=0):
+    c = np.squeeze(np.array(M.getnnz(axis=axis)))
+    s = np.squeeze(np.array(np.sum(M, axis=axis)))
+    if axis is None:
+        if c>0:
+            return s/c
+        else:
+            return mu
+    m = np.ones(shape=c.shape[0])*mu
+    m[c>0] = np.divide(s[c>0],c[c>0])
+    return m
