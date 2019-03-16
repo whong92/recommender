@@ -4,6 +4,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 import scipy.sparse as sps
 import numpy as np
 import matplotlib.pyplot as plt
+from sklearn.decomposition import PCA, TruncatedSVD
 
 class RecommenderCFSimple(Recommender):
     def __init__(self, model_file=None, k=10):
@@ -43,7 +44,15 @@ class RecommenderCFSimple(Recommender):
         M = self.M
         N = self.N
         k = self.k
-        self.S = cosine_similarity(Ucsr) # can be replaced by locality-sensitive hashing
+
+        """
+        # WORKS! TODO : explore using this with cosine similarity hashing to reduce computation time to pick k nearest neighbours
+        pca = PCA(n_components=50)
+        pca.fit(Ucsr.todense())
+        Ucsr_pca = pca.fit_transform(Ucsr.todense())
+        self.S = (cosine_similarity(Ucsr_pca)+1)/2 # can be replaced by locality-sensitive hashing
+        """
+        self.S = cosine_similarity(Ucsr)  # can be replaced by locality-sensitive hashing
 
         mu = np.array(mean_nnz(Ucsr))
         bx = mean_nnz(Ucsc, axis=0, mu=mu) - mu
