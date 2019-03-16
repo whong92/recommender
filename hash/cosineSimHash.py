@@ -17,11 +17,6 @@ class CosineSimHash(Signature):
         B = np.zeros(shape=(Nhpp,C), dtype=bool)
         XT = X.transpose()
         XT = XT.tocsr()
-        """
-        for i in range(Nhpp):
-            hpp = np.random.normal(0, 1.0, R)
-            B[i,:] = XT*hpp > 0
-        """
         hpp = np.random.normal(0, 1.0, (R,Nhpp))
         B = XT * hpp > 0
         return B.transpose()

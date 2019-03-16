@@ -1,5 +1,4 @@
 from .utils import *
-from sklearn.decomposition import PCA, TruncatedSVD
 import matplotlib.pyplot as plt
 
 def test_csv2df():
