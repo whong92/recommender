@@ -6,18 +6,18 @@ import matplotlib.pyplot as plt
 
 class CosineSimHash(Signature):
 
-    def __init__(self, num_hpp=300):
-        self.num_hpp = num_hpp
+    def __init__(self, num_hpp=300, num_row=100):
+        self.Nhpp = num_hpp
+        self.num_row = num_row
+        self.hpp = np.random.normal(0, 1.0, (self.num_row, self.Nhpp))
 
-    def generate_signature(self, X, new_hash=True):
-        Nhpp = self.num_hpp
+    def generate_signature(self, X):
         R = X.shape[0]
-        C = X.shape[1]
-        B = np.zeros(shape=(Nhpp,C), dtype=bool)
+        assert R==self.num_row, "number of rows of X not equal to number of " \
+                                "rows declared when initializing hash function"
         XT = X.transpose()
         XT = XT.tocsr()
-        hpp = np.random.normal(0, 1.0, (R,Nhpp))
-        B = XT * hpp > 0
+        B = XT * self.hpp > 0
         return B.transpose()
 
 

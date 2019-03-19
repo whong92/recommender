@@ -3,6 +3,7 @@ from .SignatureFactory import MakeSignature
 import numpy as np
 from collections import defaultdict
 import scipy.sparse as sps
+import matplotlib.pyplot as plt
 
 class LSH:
 
@@ -12,7 +13,7 @@ class LSH:
 
     def generate_signature(self, X):
 
-        M = self.sig.generate_signature(X, False)
+        M = self.sig.generate_signature(X)
         B = self.num_bands
         buckets = []
         for i in range(B):
@@ -30,6 +31,20 @@ class LSH:
                 bucket[h].add(i)
 
         return buckets
+
+    def find_similar(self, X, buckets):
+        M = self.sig.generate_signature(X)
+        B = self.num_bands
+        R = int(M.shape[0] / B)
+        sim_set = set()
+        for b, bucket in enumerate(buckets):
+            H = np.apply_along_axis(
+                lambda x : np.int64(hash(str(x)))%NUM_BUCKETS,
+                axis=0,arr=M[b*R:(b+1)*R,:]
+            )
+            for i, h in enumerate(H):
+                sim_set = sim_set.union(bucket[h])
+        return sim_set
 
 
 if __name__=="__main__":
@@ -61,10 +76,10 @@ if __name__=="__main__":
     N = 5000
     M = 100
     Hpp = 300
-    B = 10
-    NumElems = np.array([1000, 10000, 20000, 50000, 250000])
+    NumBands = np.array([5, 10, 20, 30, 50, 100])
+    E = 20000
 
-    for E in NumElems:
+    for B in NumBands:
 
         rows = np.random.randint(0, M, E)
         cols = np.random.randint(0, N, E)
@@ -76,9 +91,15 @@ if __name__=="__main__":
         buckets = lsh.generate_signature(X)
 
         num_collisions = 0
-        for k in buckets[0]:
-            if len(buckets[0][k]) > 1:
+        bucket = buckets[0]
+        for k in bucket:
+            if len(bucket[k]) > 1:
                 num_collisions += 1
+
+        sim_set = lsh.find_similar(X[:,0], buckets)
+        Y = X[:,0].transpose()*X[:,list(sim_set)]
+        print(np.mean(np.abs(Y.todense())))
+        print(len(sim_set))
 
         print(
             'number of non singleton buckets in first band: {0}, '

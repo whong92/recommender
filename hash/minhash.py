@@ -11,6 +11,7 @@ class MinHashSignature(Signature):
         super(MinHashSignature, self).__init__()
         self.num_hash = num_hash
         self.hash_fn = None
+        self.__make_hash__()
 
     def __make_hash__(self):
         S = NUM_BUCKETS
@@ -25,8 +26,6 @@ class MinHashSignature(Signature):
 
     def generate_signature(self, X, new_hash=True):
         X = X.astype(np.int64)
-        if new_hash or self.hash_fn is None:
-            self.__make_hash__()
         C = X.shape[1]
         H = self.num_hash
         M = -1*np.ones(shape=(H, C),dtype=np.int64)
