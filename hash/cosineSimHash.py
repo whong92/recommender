@@ -1,9 +1,8 @@
+from .Signature import Signature
 import numpy as np
 import scipy.sparse as sps
-from .minhash import Signature, MinHashSignature
 from sklearn.metrics.pairwise import cosine_similarity
 import matplotlib.pyplot as plt
-from scipy.spatial.distance import jaccard
 
 class CosineSimHash(Signature):
 

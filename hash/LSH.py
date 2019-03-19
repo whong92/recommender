@@ -1,17 +1,18 @@
+from . import *
+from .SignatureFactory import MakeSignature
 import numpy as np
-from .minhash import MinHashSignature, NUM_BUCKETS
 from collections import defaultdict
 import scipy.sparse as sps
 
 class LSH:
 
-    def __init__(self, num_minhash=10, num_bands=10):
+    def __init__(self, sig, num_bands=10):
         self.num_bands = num_bands
-        self.msh = MinHashSignature(num_minhash)
+        self.sig = sig
 
     def generate_signature(self, X):
 
-        M = self.msh.generate_signature(X, False)
+        M = self.sig.generate_signature(X, False)
         B = self.num_bands
         buckets = []
         for i in range(B):
@@ -38,7 +39,7 @@ if __name__=="__main__":
     H = 200
     B = 50
 
-    NumElems = np.array([1000, 5000, 10000, 50000, 100000, 250000])
+    NumElems = np.array([150000, 250000, 300000])
 
     for E in NumElems:
 
@@ -46,7 +47,8 @@ if __name__=="__main__":
         cols = np.random.randint(0, N, E)
         data = np.ones(shape=(E,), dtype=int)
         X = sps.csc_matrix((data,(rows, cols)),shape=(M,N))
-        lsh = LSH(num_minhash=H, num_bands=B)
+        msh = MakeSignature('MinHash', num_hash=H)
+        lsh = LSH(msh, num_bands=B)
         buckets = lsh.generate_signature(X)
 
         num_collisions = 0
@@ -55,3 +57,29 @@ if __name__=="__main__":
                 num_collisions += 1
 
         print('number of non singleton buckets in first band: {0}, number of filled buckets : {1}'.format(num_collisions, len(buckets[0])))
+
+    N = 5000
+    M = 100
+    Hpp = 300
+    B = 10
+    NumElems = np.array([1000, 10000, 20000, 50000, 250000])
+
+    for E in NumElems:
+
+        rows = np.random.randint(0, M, E)
+        cols = np.random.randint(0, N, E)
+        data = np.random.normal(0, 1.0, E)
+        X = sps.csc_matrix((data, (rows, cols)), shape=(M, N))
+        csh = MakeSignature('CosineHash', num_hpp=Hpp)
+
+        lsh = LSH(csh, num_bands=B)
+        buckets = lsh.generate_signature(X)
+
+        num_collisions = 0
+        for k in buckets[0]:
+            if len(buckets[0][k]) > 1:
+                num_collisions += 1
+
+        print(
+            'number of non singleton buckets in first band: {0}, '
+            'number of filled buckets : {1}'.format(num_collisions,len(buckets[0])))

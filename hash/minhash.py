@@ -1,19 +1,10 @@
+from . import *
+from .Signature import Signature
 import numpy as np
 import numpy.matlib as nm
 import scipy.sparse as sps
 import matplotlib.pyplot as plt
 from scipy.spatial.distance import jaccard
-
-NUM_BUCKETS = 2**32 - 1
-HASH_PRIME = 4295297389
-
-class Signature:
-    def __init__(self):
-        self.hashes = []
-        return
-
-    def generate_signature(self, x):
-        raise NotImplementedError
 
 class MinHashSignature(Signature):
     def __init__(self, num_hash=10):
