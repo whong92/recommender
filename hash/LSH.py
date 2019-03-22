@@ -10,36 +10,38 @@ class LSH:
     def __init__(self, sig, num_bands=10):
         self.num_bands = num_bands
         self.sig = sig
+        self.buckets = []
+        for i in range(num_bands):
+            self.buckets.append(defaultdict(set))
 
-    def generate_signature(self, X):
+    def insert(self, X):
 
         M = self.sig.generate_signature(X)
         B = self.num_bands
-        buckets = []
-        for i in range(B):
-            buckets.append(defaultdict(set))
+
         assert B < M.shape[0] and M.shape[0]%B==0, \
             "number of buckets must divide number of rows! B = {0}, R = {1}".format(B, M.shape[0])
         R = int(M.shape[0]/B)
 
-        for b,bucket in enumerate(buckets):
+        for b,bucket in enumerate(self.buckets):
             H = np.apply_along_axis(
-                lambda x : np.int64(hash(str(x)))%NUM_BUCKETS,
+                lambda x : np.int64(hash(x.tobytes()))%NUM_BUCKETS,
                 axis=0,arr=M[b*R:(b+1)*R,:]
             )
             for i, h in enumerate(H):
                 bucket[h].add(i)
 
-        return buckets
+        return self.buckets
 
-    def find_similar(self, X, buckets):
+    def find_similar(self, X):
         M = self.sig.generate_signature(X)
+
         B = self.num_bands
         R = int(M.shape[0] / B)
         sim_set = set()
-        for b, bucket in enumerate(buckets):
+        for b, bucket in enumerate(self.buckets):
             H = np.apply_along_axis(
-                lambda x : np.int64(hash(str(x)))%NUM_BUCKETS,
+                lambda x : np.int64(hash(x.tobytes()))%NUM_BUCKETS,
                 axis=0,arr=M[b*R:(b+1)*R,:]
             )
             for i, h in enumerate(H):
@@ -49,6 +51,7 @@ class LSH:
 
 if __name__=="__main__":
 
+    """
     N = 500
     M = 1000
     H = 200
@@ -72,35 +75,53 @@ if __name__=="__main__":
                 num_collisions += 1
 
         print('number of non singleton buckets in first band: {0}, number of filled buckets : {1}'.format(num_collisions, len(buckets[0])))
+    """
 
-    N = 5000
-    M = 100
-    Hpp = 300
-    NumBands = np.array([5, 10, 20, 30, 50, 100])
-    E = 20000
+    profile = False
 
-    for B in NumBands:
+    def test_cosine_hash():
 
-        rows = np.random.randint(0, M, E)
-        cols = np.random.randint(0, N, E)
-        data = np.random.normal(0, 1.0, E)
-        X = sps.csc_matrix((data, (rows, cols)), shape=(M, N))
-        csh = MakeSignature('CosineHash', num_hpp=Hpp)
+        from scipy.spatial.transform import Rotation as R
 
-        lsh = LSH(csh, num_bands=B)
-        buckets = lsh.generate_signature(X)
+        N = 5000
+        M = 3
+        Hpp = 300
+        NumBands = np.array([5, 10, 20, 30, 50, 100])
 
-        num_collisions = 0
-        bucket = buckets[0]
-        for k in bucket:
-            if len(bucket[k]) > 1:
-                num_collisions += 1
+        ref = np.random.normal(size=(M,))
+        ref /= np.linalg.norm(ref)
 
-        sim_set = lsh.find_similar(X[:,0], buckets)
-        Y = X[:,0].transpose()*X[:,list(sim_set)]
-        print(np.mean(np.abs(Y.todense())))
-        print(len(sim_set))
+        for b, B in enumerate(NumBands):
 
-        print(
-            'number of non singleton buckets in first band: {0}, '
-            'number of filled buckets : {1}'.format(num_collisions,len(buckets[0])))
+            ref2 = np.random.normal(size=(M,N))
+            C = np.cross(ref, ref2, axisb=0)
+            C = np.divide(C, np.expand_dims(np.linalg.norm(C, axis=1), axis=1))
+            C = np.multiply(C, np.random.uniform(0, np.pi,size=(N,1)))
+            rot = R.from_rotvec(C)
+            X = sps.csc_matrix(rot.apply(ref).transpose())
+
+            csh = MakeSignature('CosineHash', num_row=3, num_hpp=Hpp)
+            lsh = LSH(csh, num_bands=B)
+            lsh.insert(X)
+
+            sim_set = lsh.find_similar(sps.csc_matrix(np.expand_dims(ref, axis=1), shape=(M,1)))
+            Y = np.arccos(ref * X[:, list(sim_set)])
+            if not profile:
+                plt.subplot(len(NumBands),1, b+1)
+                plt.hist(Y, bins=np.linspace(0, np.pi, 50))
+
+        if not profile:
+            plt.show()
+
+
+    if not profile:
+        test_cosine_hash()
+    else:
+        import cProfile, pstats
+        pr = cProfile.Profile()
+        pr.enable()
+        pr.run('test_cosine_hash()')
+        pr.disable()
+        sortby = 'cumulative'
+        ps = pstats.Stats(pr).sort_stats(sortby)
+        ps.print_stats()
