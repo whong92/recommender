@@ -1,25 +1,8 @@
-from .Signature import Signature
 import numpy as np
-import scipy.sparse as sps
+from .Signature import CosineSimSignature
 from sklearn.metrics.pairwise import cosine_similarity
 import matplotlib.pyplot as plt
-
-class CosineSimHash(Signature):
-
-    def __init__(self, num_hpp=300, num_row=100):
-        self.Nhpp = num_hpp
-        self.num_row = num_row
-        self.hpp = np.random.normal(0, 1.0, (self.num_row, self.Nhpp))
-
-    def generate_signature(self, X):
-        R = X.shape[0]
-        assert R==self.num_row, "number of rows of X not equal to number of " \
-                                "rows declared when initializing hash function"
-        XT = X.transpose()
-        XT = XT.tocsr()
-        B = XT * self.hpp > 0
-        return B.transpose()
-
+import scipy.sparse as sps
 
 if __name__=="__main__":
 
@@ -34,7 +17,7 @@ if __name__=="__main__":
         cols = np.random.randint(0, N, E)
         data = np.random.normal(0, 1.0, E)
         X = sps.csc_matrix((data,(rows, cols)),shape=(M,N))
-        csh = CosineSimHash(num_hpp=Hpp)
+        csh = CosineSimSignature(num_hpp=Hpp)
         S = csh.generate_signature(X)
 
         XT = X.transpose()
