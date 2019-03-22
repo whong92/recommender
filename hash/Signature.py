@@ -22,6 +22,7 @@ class Signature:
 class CosineSimSignature(Signature):
 
     def __init__(self, num_hpp=300, num_row=100):
+        super(CosineSimSignature, self).__init__()
         self.Nhpp = num_hpp
         self.num_row = num_row
         self.hpp = np.random.normal(0, 1.0, (self.num_row, self.Nhpp))
