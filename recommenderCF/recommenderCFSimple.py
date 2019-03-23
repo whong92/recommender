@@ -33,6 +33,47 @@ class RecommenderCFSimple(Recommender):
             'csc': sps.csc_matrix(um_test, shape=(self.M, self.N))
         }
 
+    def _compute_similarity_matrix(self):
+        Ucsr = self.training_data['csr']
+        self.S = cosine_similarity(Ucsr)
+
+    def _compute_weighted_score(self, u, i=None):
+
+        Ucsc = self.training_data['csc']
+
+        k = self.k
+        mu = self.mu
+        bx = self.bx
+        bi = self.bi
+        ss = Ucsc[:, u].nonzero()[0]  # row numbers
+        ratings = np.array(Ucsc[:, u].todense())[ss, 0]
+        bxi = mu + bx[u] + bi
+        bxj = bxi[ss]
+
+        if i is None:
+            S = self.S[:, ss]
+        else:
+            S = np.expand_dims(self.S[i, ss], axis=0)
+
+        if len(ss) >= k:
+            kidx = np.argpartition(S, S.shape[1] - k + 1)[:, -k:]
+            ratings = ratings[kidx]
+            Sij = np.partition(S, S.shape[1] - k + 1, axis=1)[:, -k:]
+            bxj = bxj[kidx]
+            T = np.sum(np.multiply(Sij, ratings - bxj), axis=1)
+        else:
+            Sij = S
+            T = np.matmul(Sij, ratings - bxj)
+
+        if i is not None:
+            bxi = np.expand_dims(bxi[i], axis=0)
+
+        nzi = np.sum(Sij, axis=1) > 0
+        pred = np.zeros(shape=(S.shape[0],))
+        pred[nzi] = bxi[nzi] + np.divide(T[nzi],np.sum(Sij[nzi,:], axis=1))
+        pred[~nzi] = bxi[~nzi]
+        return pred
+
     def train(self, precompute_ud = False):
 
         assert self.training_data is not None
@@ -45,43 +86,22 @@ class RecommenderCFSimple(Recommender):
         N = self.N
         k = self.k
 
-        """
-        # WORKS! TODO : explore using this with cosine similarity hashing to reduce computation time to pick k nearest neighbours
-        pca = PCA(n_components=50)
-        pca.fit(Ucsr.todense())
-        Ucsr_pca = pca.fit_transform(Ucsr.todense())
-        self.S = (cosine_similarity(Ucsr_pca)+1)/2 # can be replaced by locality-sensitive hashing
-        """
-        self.S = cosine_similarity(Ucsr)  # can be replaced by locality-sensitive hashing
+        self._compute_similarity_matrix() # can be replaced by locality-sensitive hashing
 
+        # compute linear model
         mu = np.array(mean_nnz(Ucsr))
         bx = mean_nnz(Ucsc, axis=0, mu=mu) - mu
         bi = mean_nnz(Ucsr, axis=1, mu=mu) - mu
-
         self.mu = mu
         self.bx = bx
         self.bi = bi
 
-        if precompute_ud: # pre-computation, expensive!
+        from tqdm import tqdm
 
+        if precompute_ud: # pre-computation, expensive!
             self.Ud = np.zeros(shape=(M, N))
-            for u in range(N):
-                ss = Ucsc[:,u].nonzero()[0] #row numbers
-                ratings = np.array(Ucsc[ss,u].todense())[:,0]
-                bxi = mu + bx[u] + bi
-                bxj = bxi[ss]
-                if self.S[:, ss].shape[1] >= k:
-                    kidx = np.argpartition(self.S[:, ss], self.S[:, ss].shape[1]-k+1)[:,-k:]
-                    ratings = ratings[kidx]
-                    Sij = np.partition(self.S[:, ss], self.S[:, ss].shape[1]-k+1, axis=1)[:,-k:]
-                    bxj = bxj[kidx]
-                    T = np.sum(np.multiply(Sij, ratings-bxj),axis=1)
-                else:
-                    Sij = self.S[:, ss]
-                    T = np.matmul(Sij, ratings - bxj)
-                nzi = np.sum(Sij,axis=1) > 0
-                self.Ud[nzi,u] = bxi[nzi] + np.divide(T[nzi],np.sum(Sij[nzi,:], axis=1))
-                self.Ud[~nzi, u] = bxi[~nzi]
+            for u in tqdm(range(N)):
+                self.Ud[:,u] = self._compute_weighted_score(u)
 
         test_idx = Vcsr.nonzero()
         test_error = rmse(self.predict(test_idx[0], test_idx[1]), Vcsr[test_idx[0], test_idx[1]])
@@ -93,39 +113,39 @@ class RecommenderCFSimple(Recommender):
         assert len(users) == len(items)
 
         rpred = np.zeros(shape=(len(users),))
-
+        from tqdm import tqdm
         if self.Ud is None:
-            Ucsc = self.training_data['csc'] # fast for col slices
-            k = self.k
-            mu = self.mu
-            bx = self.bx
-            bi = self.bi
-            for x,(u,i) in enumerate(zip(users, items)):
-                ss = Ucsc[:,u].nonzero()[0]
-                ratings = np.array(Ucsc[ss, u].todense())[:,0]
-                bxi = mu + bx[u] + bi
-                bxj = bxi[ss]
-                if len(self.S[i, ss]) >= k:
-                    kidx = np.argpartition(self.S[i, ss], self.S[i, ss].shape[1]-k+1)[-k:]
-                    Sij = self.S[i, ss][kidx]
-                    ratings = ratings[kidx]
-                    bxj = bxj[kidx]
-                else:
-                    Sij = self.S[i,ss]
-                if np.sum(Sij) > 0:
-                    rpred[x] = bxi[i] + np.divide(np.dot(Sij, ratings - bxj), np.sum(Sij))
-                else:
-                    rpred[x] = bxi[i]
+            for x,(u,i) in tqdm(enumerate(zip(users, items))):
+                rpred[x] = self._compute_weighted_score(u, i)
         else:
             rpred = self.Ud[items, users]
 
         return rpred
 
 if __name__=="__main__":
-    for k in [10,20,50,100,150,200]:
+    def main(k):
         rcf = RecommenderCFSimple(k=k)
         rcf.from_csv('D:/PycharmProjects/recommender/data/ml-latest-small/ratings.csv', 'userId', 'movieId', 'rating')
         test_error, es = rcf.train(precompute_ud=True)
-        print("k : {0} , test error {1}".format(k, test_error))
-        #plt.hist(es, bins=50)
-        plt.show()
+        # print("k : {0} , test error {1}".format(k, test_error))
+        # plt.semilogx(k, test_error, 'bo')
+
+
+    import cProfile, pstats
+
+    pr = cProfile.Profile()
+    pr.enable()
+    pr.run('main(50)')
+    pr.disable()
+    sortby = 'cumulative'
+    ps = pstats.Stats(pr).sort_stats(sortby)
+    ps.print_stats(20)
+
+    """
+    num_experiments = 10
+    for i in range(num_experiments):
+        for k in [2, 5, 10, 20, 50, 100, 150, 200]:
+                main(k)
+
+    plt.show()
+    """

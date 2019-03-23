@@ -48,6 +48,21 @@ class LSH:
                 sim_set = sim_set.union(bucket[h])
         return sim_set
 
+    def find_similar_multiple(self, X):
+        M = self.sig.generate_signature(X)
+
+        B = self.num_bands
+        R = int(M.shape[0] / B)
+        sim_set = defaultdict(set)
+        for b, bucket in enumerate(self.buckets):
+            H = np.apply_along_axis(
+                lambda x: np.int64(hash(x.tobytes())) % NUM_BUCKETS,
+                axis=0, arr=M[b * R:(b + 1) * R, :]
+            )
+            for i, h in enumerate(H):
+                sim_set[i] = sim_set[i].union(bucket[h])
+        return sim_set
+
 
 if __name__=="__main__":
 
@@ -77,7 +92,7 @@ if __name__=="__main__":
         print('number of non singleton buckets in first band: {0}, number of filled buckets : {1}'.format(num_collisions, len(buckets[0])))
     """
 
-    profile = False
+    profile = True
 
     def test_cosine_hash():
 
