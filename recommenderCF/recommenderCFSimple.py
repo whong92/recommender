@@ -127,10 +127,11 @@ if __name__=="__main__":
         rcf = RecommenderCFSimple(k=k)
         rcf.from_csv('D:/PycharmProjects/recommender/data/ml-latest-small/ratings.csv', 'userId', 'movieId', 'rating')
         test_error, es = rcf.train(precompute_ud=True)
-        # print("k : {0} , test error {1}".format(k, test_error))
-        # plt.semilogx(k, test_error, 'bo')
+        print("k : {0} , test error {1}".format(k, test_error))
+        plt.semilogx(k, test_error, 'bo')
 
 
+    """
     import cProfile, pstats
 
     pr = cProfile.Profile()
@@ -142,10 +143,10 @@ if __name__=="__main__":
     ps.print_stats(20)
 
     """
-    num_experiments = 10
+    num_experiments = 1
     for i in range(num_experiments):
         for k in [2, 5, 10, 20, 50, 100, 150, 200]:
                 main(k)
 
     plt.show()
-    """
+
