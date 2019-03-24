@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import scipy.sparse as sps
+import tensorflow as tf
 
 def csv2df(file, item, user, rating, **kwargs):
     df = pd.read_csv(file, usecols=[item, user, rating])
@@ -40,3 +41,18 @@ def mean_nnz(M, axis=None, mu=0):
     m = np.ones(shape=c.shape[0])*mu
     m[c>0] = np.divide(s[c>0],c[c>0])
     return m
+
+def splitDf(df, train_test_split=0.8):
+    assert train_test_split > 0
+    perm = np.random.permutation(len(df))
+    train_df = df.iloc[perm[:int(len(df) * train_test_split)]]
+    test_df = df.iloc[perm[:int(len(df) * train_test_split)]]
+    return train_df, test_df
+
+def makeTfDataset(input, batchsize, numepochs):
+    ds = tf.data.Dataset.from_tensor_slices(input)
+    ds = ds.batch(batchsize)
+    ds = ds.repeat(numepochs)
+    iterator = ds.make_initializable_iterator()
+    next = iterator.get_next()
+    return iterator, next
