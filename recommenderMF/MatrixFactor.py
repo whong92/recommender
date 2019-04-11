@@ -92,6 +92,7 @@ class MatrixFactorizer(object):
         )
         print('Test: RMSE: %f ' % np.sqrt(eval_result['rmse']))
 
+    # TODO: add predict mode
     def save(self, path):
         self.model.export_saved_model(export_dir_base=path, serving_input_receiver_fn=MatrixFactorizer._predict_input_fn)
 

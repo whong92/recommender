@@ -19,6 +19,7 @@ class recommenderMF(Recommender):
         self.predictor = None
         self.n_users = n_users
         self.n_items = n_items
+        self.lsh = None
 
         if mode is 'train':
             f = 20  # latent factor dimensionality
@@ -27,6 +28,7 @@ class recommenderMF(Recommender):
             decay = 0.0
             self.estimator = MatrixFactorizer(n_users, n_items, f, lr, lamb, decay)
         elif mode is 'predict':
+            # TODO: load LSH here
             self.predictor = predictor.from_saved_model(save_path)
 
     def train(self, u_in, i_in, r_in, u_in_test, i_in_test, r_in_test, save_path):
@@ -38,14 +40,23 @@ class recommenderMF(Recommender):
             r_in,
             {'u_in': u_in_test, 'i_in': i_in_test},
             r_in_test,
-            numepochs=20,
+            numepochs=1,
         )
+
+        # generate embeddigns for all items, and insert into LSH
+        pred = predictor.from_estimator(self.estimator.model, MatrixFactorizer._predict_input_fn)
+        p = pred(
+            {'u_in': np.zeros(shape=(self.n_items,), dtype=np.int32),
+             'i_in': np.arange(1, self.n_items+1, dtype=np.int32)
+             })
+        # TODO: save LSH here
+        self.lsh = LSH(MakeSignature('CosineHash', num_row=20, num_hpp=100), num_bands=5)
+        self.lsh.insert(sps.csc_matrix(p['q'].transpose()))
         self.estimator.save(save_path)
 
     def predict(self, u_in, i_in):
 
         assert self.mode is 'predict'
-
         return self.predictor({'u_in': u_in, 'i_in': i_in})
 
     def recommend(self, u_in):
@@ -54,7 +65,9 @@ class recommenderMF(Recommender):
 
         p = self.predictor({'u_in': np.tile(np.array([u_in], dtype=np.int32), self.n_items),
                         'i_in': np.arange(1, self.n_items+1, dtype=np.int32)})
-        lsh = LSH(MakeSignature('CosineHash', num_row=20, num_hpp=300))
+
+        # TODO: use saved LSH
+        lsh = LSH(MakeSignature('CosineHash', num_row=20, num_hpp=100), num_bands=5)
         lsh.insert(sps.csc_matrix(p['q'].transpose()))
         bla = lsh.find_similar(
             sps.csc_matrix(np.expand_dims(p['p'][0,:], axis=1))
@@ -70,7 +83,8 @@ if __name__=="__main__":
     df, user_map, item_map, N, M = csv2df('D:/PycharmProjects/recommender/data/ml-latest-small/ratings.csv',
                       'movieId', 'userId', 'rating', return_cat_mapping=True)
 
-    """
+
+    # training
     train_test_split = 0.8
     D_train, D_test = splitDf(df, train_test_split)
 
@@ -95,12 +109,11 @@ if __name__=="__main__":
         np.array(Ratings_test, dtype=np.float64),
         save_path = '.'
     )
-
     """
     df_mov = pd.read_csv('D:/PycharmProjects/recommender/data/ml-latest-small/movies.csv')
     rmf = recommenderMF(N, M, mode='predict', save_path='./1554996920')
 
-    user = 567
+    user = 100
     user_df = df.loc[df.user_cat==user]
 
     pred = rmf.predict(np.array(user_df['user']), np.array(user_df['item']))
@@ -117,12 +130,18 @@ if __name__=="__main__":
     )
     sorted_items = sorted_items.merge(item_map, left_on='item_code', right_on='item_cat')
 
+    import matplotlib.pyplot as plt
+    plt.hist(user_df.rhat)
+    plt.show()
+
     print(sorted_items.merge(df_mov, left_on='item', right_on='movieId')[:10])
     print(user_df.sort_values('rating').merge(df_mov, left_on='item', right_on='movieId')[:10])
 
 
     print(sorted_items.merge(df_mov, left_on='item', right_on='movieId')[-10:])
     print(user_df.sort_values('rating').merge(df_mov, left_on='item', right_on='movieId')[-10:])
+    """
+
 
 
 
