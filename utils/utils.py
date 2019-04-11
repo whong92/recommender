@@ -3,12 +3,29 @@ import numpy as np
 import scipy.sparse as sps
 import tensorflow as tf
 
-def csv2df(file, item, user, rating, **kwargs):
+def csv2df(file, item, user, rating, return_cat_mapping=False, **kwargs):
+
     df = pd.read_csv(file, usecols=[item, user, rating])
-    df.columns = ['item', 'user', 'rating']
-    df['item'] = df['item'].astype("category").cat.codes
-    df['user'] = df['user'].astype("category").cat.codes
+    df.rename(columns={
+        item: 'item',
+        user: 'user',
+        rating: 'rating',
+    }, inplace=True)
+
+    df['item_cat'] = df['item'].astype("category").cat.codes
+    df['user_cat'] = df['user'].astype("category").cat.codes
     df['rating'] = df['rating'].astype(np.float64)
+
+    if return_cat_mapping:
+        user_map = df[['user_cat', 'user']].drop_duplicates()
+        item_map = df[['item_cat', 'item']].drop_duplicates()
+
+    df['item'] = df['item_cat']
+    df['user'] = df['user_cat']
+
+    if return_cat_mapping:
+        return df, user_map, item_map, np.unique(df['user']).shape[0], np.unique(df['item']).shape[0]
+
     return df, np.unique(df['user']).shape[0], np.unique(df['item']).shape[0]
 
 def df2umCSR(df, M=None, N=None):

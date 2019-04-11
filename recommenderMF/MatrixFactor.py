@@ -25,7 +25,8 @@ class MatrixFactorizer(object):
             q = tf.nn.embedding_lookup(Q, i_in)
             bu = tf.nn.embedding_lookup(Bu, u_in)
             bi = tf.nn.embedding_lookup(Bi, i_in)
-            rhat = tf.reduce_sum(tf.multiply(p, q), axis=1) + bu + bi
+            y = tf.reduce_sum(tf.multiply(p, q), axis=1)
+            rhat = y + bu + bi
 
         if mode == tf.estimator.ModeKeys.PREDICT:
             predictions = {'rhat': rhat, 'p':p, 'q':q}
@@ -51,7 +52,7 @@ class MatrixFactorizer(object):
         return tf.estimator.EstimatorSpec(mode, loss=loss, train_op=opt)
 
     @staticmethod
-    def _input_fn(features, labels=None, batchsize=32, numepochs=10):
+    def _input_fn(features, labels=None, batchsize=32, numepochs=30):
         features = dict(features)
         if labels is None:
             # No labels, use only features.
