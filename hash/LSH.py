@@ -4,13 +4,27 @@ import numpy as np
 from collections import defaultdict
 import scipy.sparse as sps
 import matplotlib.pyplot as plt
+import json
 
 class LSH:
 
-    def __init__(self, sig, num_bands=10):
+    def __init__(self, sig, num_bands=10, path=None):
+
         self.num_bands = num_bands
         self.sig = sig
         self.buckets = []
+
+        if path is not None:
+            with open(path, 'r', encoding='utf-8') as fp:
+                conf = json.load(fp)
+                buckets = conf['buckets']
+                self.num_bands = conf['num_bands']
+                for bucket in buckets:
+                    self.buckets.append(defaultdict(set))
+                    for k in bucket:
+                        self.buckets[-1][int(k)] = self.buckets[-1][int(k)].union(set(bucket[k]))
+            return
+
         for i in range(num_bands):
             self.buckets.append(defaultdict(set))
 
@@ -35,7 +49,6 @@ class LSH:
 
     def find_similar(self, X):
         M = self.sig.generate_signature(X)
-
         B = self.num_bands
         R = int(M.shape[0] / B)
         sim_set = set()
@@ -47,6 +60,17 @@ class LSH:
             for i, h in enumerate(H):
                 sim_set = sim_set.union(bucket[h])
         return sim_set
+
+    def save(self, path):
+
+        with open(path, 'w', encoding='utf-8') as fp:
+            save_buckets = []
+            for bucket in self.buckets:
+                save_bucket = {}
+                for k in bucket:
+                    save_bucket[str(k)] = list(bucket[k])
+                save_buckets.append(save_bucket)
+            json.dump({'num_bands': self.num_bands, 'buckets': save_buckets}, fp)
 
     def find_similar_multiple(self, X):
         M = self.sig.generate_signature(X)
@@ -91,52 +115,3 @@ if __name__=="__main__":
 
         print('number of non singleton buckets in first band: {0}, number of filled buckets : {1}'.format(num_collisions, len(buckets[0])))
     """
-
-    profile = True
-
-    def test_cosine_hash():
-
-        from scipy.spatial.transform import Rotation as R
-
-        N = 5000
-        M = 3
-        Hpp = 300
-        NumBands = np.array([5, 10, 20, 30, 50, 100])
-
-        ref = np.random.normal(size=(M,))
-        ref /= np.linalg.norm(ref)
-
-        for b, B in enumerate(NumBands):
-
-            ref2 = np.random.normal(size=(M,N))
-            C = np.cross(ref, ref2, axisb=0)
-            C = np.divide(C, np.expand_dims(np.linalg.norm(C, axis=1), axis=1))
-            C = np.multiply(C, np.random.uniform(0, np.pi,size=(N,1)))
-            rot = R.from_rotvec(C)
-            X = sps.csc_matrix(rot.apply(ref).transpose())
-
-            csh = MakeSignature('CosineHash', num_row=3, num_hpp=Hpp)
-            lsh = LSH(csh, num_bands=B)
-            lsh.insert(X)
-
-            sim_set = lsh.find_similar(sps.csc_matrix(np.expand_dims(ref, axis=1), shape=(M,1)))
-            Y = np.arccos(ref * X[:, list(sim_set)])
-            if not profile:
-                plt.subplot(len(NumBands),1, b+1)
-                plt.hist(Y, bins=np.linspace(0, np.pi, 50))
-
-        if not profile:
-            plt.show()
-
-
-    if not profile:
-        test_cosine_hash()
-    else:
-        import cProfile, pstats
-        pr = cProfile.Profile()
-        pr.enable()
-        pr.run('test_cosine_hash()')
-        pr.disable()
-        sortby = 'cumulative'
-        ps = pstats.Stats(pr).sort_stats(sortby)
-        ps.print_stats()
