@@ -164,7 +164,12 @@ if __name__=="__main__":
     sorted_items = sorted_items.merge(item_map, left_on='item_code', right_on='item_cat')
 
     import matplotlib.pyplot as plt
-    plt.hist(user_df.rhat)
+    rating_counts = np.flip(np.sort(np.array(df.groupby('item').count()['user'], dtype=np.int32)))
+    plt.subplot('211')
+    plt.plot(np.linspace(0, len(rating_counts), len(rating_counts), dtype=np.int32), rating_counts, 'o')
+    plt.subplot('212')
+    plt.plot(np.linspace(0, len(rating_counts), len(rating_counts), dtype=np.int32), np.cumsum(rating_counts), 'o')
+    #plt.hist(user_df.rhat)
     plt.show()
 
     print(sorted_items.merge(df_mov, left_on='item', right_on='movieId')[:10])
