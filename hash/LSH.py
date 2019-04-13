@@ -5,6 +5,7 @@ from collections import defaultdict
 import scipy.sparse as sps
 import matplotlib.pyplot as plt
 import json
+from zlib import adler32
 
 class LSH:
 
@@ -39,7 +40,7 @@ class LSH:
 
         for b,bucket in enumerate(self.buckets):
             H = np.apply_along_axis(
-                lambda x : np.int64(hash(x.tobytes()))%NUM_BUCKETS,
+                lambda x : np.int64(adler32(x.tobytes()))%NUM_BUCKETS,
                 axis=0,arr=M[b*R:(b+1)*R,:]
             )
             for i, h in enumerate(H):
@@ -54,9 +55,10 @@ class LSH:
         sim_set = set()
         for b, bucket in enumerate(self.buckets):
             H = np.apply_along_axis(
-                lambda x : np.int64(hash(x.tobytes()))%NUM_BUCKETS,
+                lambda x : np.int64(adler32(x.tobytes()))%NUM_BUCKETS,
                 axis=0,arr=M[b*R:(b+1)*R,:]
             )
+
             for i, h in enumerate(H):
                 sim_set = sim_set.union(bucket[h])
         return sim_set
@@ -80,7 +82,7 @@ class LSH:
         sim_set = defaultdict(set)
         for b, bucket in enumerate(self.buckets):
             H = np.apply_along_axis(
-                lambda x: np.int64(hash(x.tobytes())) % NUM_BUCKETS,
+                lambda x: np.int64(adler32(x.tobytes())) % NUM_BUCKETS,
                 axis=0, arr=M[b * R:(b + 1) * R, :]
             )
             for i, h in enumerate(H):

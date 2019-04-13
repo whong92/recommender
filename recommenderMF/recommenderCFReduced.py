@@ -1,6 +1,6 @@
 from sklearn.metrics.pairwise import cosine_similarity
-from ..hash.Signature import MakeSignature
-from ..hash.LSH import LSH
+from hash.Signature import MakeSignature
+from hash.LSH import LSH
 from .recommenderCFSimple import RecommenderCFSimple
 import matplotlib.pyplot as plt
 from sklearn.decomposition import TruncatedSVD
@@ -8,6 +8,7 @@ import scipy.sparse as sps
 import numpy as np
 
 class RecommenderCFReduced(RecommenderCFSimple):
+
     def __init__(self, model_file=None, k=10, comp=50, use_lsh=False, num_hpp=300, num_lsh_bands=10):
         super(RecommenderCFReduced, self).__init__(model_file, k)
         self.comp = comp

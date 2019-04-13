@@ -1,10 +1,9 @@
-from ..recommenderInterface import Recommender
-from ..utils.utils import csv2df, df2umCSR, rmse, mean_nnz
+from recommenderInterface import Recommender
+from utils.utils import csv2df, df2umCSR, rmse, mean_nnz
 from sklearn.metrics.pairwise import cosine_similarity
 import scipy.sparse as sps
 import numpy as np
 import matplotlib.pyplot as plt
-from sklearn.decomposition import PCA, TruncatedSVD
 
 class RecommenderCFSimple(Recommender):
     def __init__(self, model_file=None, k=10):
