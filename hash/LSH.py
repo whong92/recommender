@@ -29,10 +29,14 @@ class LSH:
         for i in range(num_bands):
             self.buckets.append(defaultdict(set))
 
-    def insert(self, X):
+    def insert(self, X, Xindex=None):
 
         M = self.sig.generate_signature(X)
         B = self.num_bands
+        if Xindex is None:
+            Xindex = np.linspace(0, M.shape[1], M.shape[1], dtype=int)
+        else:
+            assert Xindex.shape[0]==M.shape[1], Xindex.dtype is int
 
         assert B < M.shape[0] and M.shape[0]%B==0, \
             "number of buckets must divide number of rows! B = {0}, R = {1}".format(B, M.shape[0])
@@ -44,7 +48,7 @@ class LSH:
                 axis=0,arr=M[b*R:(b+1)*R,:]
             )
             for i, h in enumerate(H):
-                bucket[h].add(i)
+                bucket[h].add(int(Xindex[i]))
 
         return self.buckets
 

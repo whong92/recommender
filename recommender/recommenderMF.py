@@ -22,21 +22,18 @@ class recommenderMF(Recommender):
         self.n_items = n_items
         self.lsh = None
 
-        if mode is 'train':
-            f = 20  # latent factor dimensionality
-            lamb = 0.001
-            lr = 0.01
-            decay = 0.0
-            self.estimator = MatrixFactorizer(n_users, n_items, f, lr, lamb, decay)
-        elif mode is 'predict':
+        if mode is 'predict':
             sig_path = os.path.join(lsh_path, 'signature.json')
             hash_path = os.path.join(lsh_path, 'hash.json')
             self.lsh = LSH(MakeSignature('CosineHash', path=sig_path), path=hash_path)
             self.predictor = predictor.from_saved_model(model_path)
 
-    def train(self, u_in, i_in, r_in, u_in_test, i_in_test, r_in_test, model_path, lsh_path):
+    def train(self, u_in, i_in, r_in, u_in_test, i_in_test, r_in_test, model_path=None, lsh_path=None,
+              mf_f=20, mf_lamb=.001, mf_lr=.01, mf_decay=0.0, lsh_numrow=20, lsh_numhpp=100, lsh_numbands=5):
 
         assert self.mode is 'train', "must be in train mode!"
+
+        self.estimator = MatrixFactorizer(self.n_users, self.n_items, mf_f, mf_lr, mf_lamb, mf_decay)
 
         self.estimator.fit(
             {'u_in': u_in, 'i_in': i_in},
@@ -50,32 +47,41 @@ class recommenderMF(Recommender):
         pred = predictor.from_estimator(self.estimator.model, MatrixFactorizer._predict_input_fn)
         p = pred(
             {'u_in': np.zeros(shape=(self.n_items,), dtype=np.int32),
-             'i_in': np.arange(1, self.n_items+1, dtype=np.int32)
+             'i_in': np.arange(0, self.n_items, dtype=np.int32)
              })
 
-        sig = MakeSignature('CosineHash', num_row=20, num_hpp=100)
-        sig.save(os.path.join(lsh_path, 'signature.json'))
-        self.lsh = LSH(sig, num_bands=5)
+        sig = MakeSignature('CosineHash', num_row=lsh_numrow, num_hpp=lsh_numhpp)
+        self.lsh = LSH(sig, num_bands=lsh_numbands)
         self.lsh.insert(sps.csc_matrix(p['q'].transpose()))
-        self.lsh.save(os.path.join(lsh_path, 'hash.json'))
-        self.estimator.save(model_path)
 
-    def make_and_update_hash(self, lsh_path=None):
+        if lsh_path is not None:
+            sig.save(os.path.join(lsh_path, 'signature.json'))
+            self.lsh.save(os.path.join(lsh_path, 'hash.json'))
+        if model_path is not None:
+            self.estimator.save(model_path)
+
+    def make_and_update_hash(self, lsh_path=None, lsh_numrow=20, lsh_numhpp=100, lsh_numbands=5, items=None):
+        # rebuild lsh
         if self.mode is'train':
             pred = predictor.from_estimator(self.estimator.model, MatrixFactorizer._predict_input_fn)
         else:
             pred = self.predictor
+
+        if items is None:
+            items = np.arange(0, self.n_items, dtype=np.int32)
+
         p = pred(
-            {'u_in': np.zeros(shape=(self.n_items,), dtype=np.int32),
-             'i_in': np.arange(1, self.n_items + 1, dtype=np.int32)
+            {'u_in': np.zeros(shape=(len(items),), dtype=np.int32),
+             'i_in': items
              })
-        sig = MakeSignature('CosineHash', num_row=20, num_hpp=400)
-        self.lsh = LSH(sig, num_bands=10)
-        self.lsh.insert(sps.csc_matrix(p['q'].transpose()))
+
+        sig = MakeSignature('CosineHash', num_row=lsh_numrow, num_hpp=lsh_numhpp)
+        self.lsh = LSH(sig, num_bands=lsh_numbands)
+        self.lsh.insert(sps.csc_matrix(p['q'].transpose()),Xindex=items)
+
         if lsh_path is not None:
             sig.save(os.path.join(lsh_path, 'signature.json'))
             self.lsh.save(os.path.join(lsh_path, 'hash.json'))
-
 
     def predict(self, u_in, i_in):
 
@@ -83,12 +89,11 @@ class recommenderMF(Recommender):
         return self.predictor({'u_in': u_in, 'i_in': i_in})
 
     def recommend_lsh(self, u_in):
-
+        # recommendation using lsh
         assert type(u_in) is int
 
         p = self.predictor({'u_in': np.array([u_in], dtype=np.int32),
                         'i_in': np.array([0], dtype=np.int32)})
-
 
         bla = self.lsh.find_similar(
             sps.csc_matrix(np.expand_dims(p['p'][0,:], axis=1))
@@ -96,14 +101,14 @@ class recommenderMF(Recommender):
         idx = np.array(list(bla), dtype=np.int32)
         p = self.predictor({'u_in': np.tile(np.array([u_in], dtype=np.int32), len(idx)),
                             'i_in': idx})
-        return idx[np.argsort(p['rhat'])] + 1, np.sort(p['rhat'])
+        return idx[np.argsort(p['rhat'])], np.sort(p['rhat'])
 
     def recommend(self, u_in):
         # manual prediction by enumerating all stuff
         p = self.predictor({'u_in': np.tile(np.array([u_in], dtype=np.int32), self.n_items),
-                            'i_in': np.arange(1, self.n_items + 1, dtype=np.int32)})
+                            'i_in': np.arange(0, self.n_items, dtype=np.int32)})
 
-        return np.argsort(p['rhat']) + 1, np.sort(p['rhat'])
+        return np.argsort(p['rhat']), np.sort(p['rhat'])
 
 
 
@@ -138,15 +143,18 @@ if __name__=="__main__":
         model_path = './bla',
         lsh_path = './bla'
     )
-
     """
 
     # prediction
     df_mov = pd.read_csv('D:/PycharmProjects/recommender/data/ml-latest-small/movies.csv')
     rmf = recommenderMF(N, M, mode='predict', model_path='./bla/1555182808', lsh_path='./bla')
-    print(np.max(df.item))
-    rmf.make_and_update_hash(lsh_path='./bla')
-    user = 99
+
+    thing = df.groupby('item').count()['user']
+    thing = thing.loc[thing > 30]
+
+    rmf.make_and_update_hash(lsh_path='./bla', items=thing.index)
+
+    user = 54
     user_df = df.loc[df.user_cat==user]
 
     pred = rmf.predict(np.array(user_df['user']), np.array(user_df['item']))
@@ -154,7 +162,7 @@ if __name__=="__main__":
     user_df.rename(columns={'item':'item_code'}, inplace=True)
     user_df = user_df.merge(item_map, left_on='item_code', right_on='item_cat')
 
-    sorted_items, sorted_score = rmf.recommend(user)
+    sorted_items, sorted_score = rmf.recommend_lsh(user)
     sorted_items = pd.DataFrame(
         {
             'item_code': sorted_items,
