@@ -1,15 +1,35 @@
 from . import *
-from .Signature import MakeSignature
 import numpy as np
 from collections import defaultdict
-import scipy.sparse as sps
-import matplotlib.pyplot as plt
 import json
 from zlib import adler32
 
-class LSH:
+def MakeLSH(name, *args, **kwargs):
+    switcher = {
+        'LSHSimple' : LSH,
+        'LSHDB': LSHDB,
+    }
+    assert name in switcher, "{0} not in {1}".format(name, switcher.keys())
+    return switcher[name](*args, **kwargs)
+
+class LSHInterface:
+    def __init__(self):
+        pass
+
+    def insert(self, X, Xindex=None):
+        raise NotImplementedError
+
+    def find_similar(self, X):
+        raise NotImplementedError
+
+    def save(self, path=None):
+        raise NotImplementedError
+
+class LSH(LSHInterface):
 
     def __init__(self, sig, num_bands=10, path=None):
+
+        super(LSH, self).__init__()
 
         self.num_bands = num_bands
         self.sig = sig
@@ -94,30 +114,7 @@ class LSH:
         return sim_set
 
 
-if __name__=="__main__":
-
-    """
-    N = 500
-    M = 1000
-    H = 200
-    B = 50
-
-    NumElems = np.array([150000, 250000, 300000])
-
-    for E in NumElems:
-
-        rows = np.random.randint(0, M, E)
-        cols = np.random.randint(0, N, E)
-        data = np.ones(shape=(E,), dtype=int)
-        X = sps.csc_matrix((data,(rows, cols)),shape=(M,N))
-        msh = MakeSignature('MinHash', num_hash=H)
-        lsh = LSH(msh, num_bands=B)
-        buckets = lsh.generate_signature(X)
-
-        num_collisions = 0
-        for k in buckets[0]:
-            if len(buckets[0][k]) > 1:
-                num_collisions += 1
-
-        print('number of non singleton buckets in first band: {0}, number of filled buckets : {1}'.format(num_collisions, len(buckets[0])))
-    """
+class LSHDB(LSHInterface):
+    def __init__(self, dbconn=None):
+        super(LSHDB, self).__init__()
+        self.dbconn=dbconn
