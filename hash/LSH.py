@@ -87,7 +87,9 @@ class LSH(LSHInterface):
                 sim_set = sim_set.union(bucket[h])
         return sim_set
 
-    def save(self, path):
+    def save(self, path=None):
+
+        assert path is not None
 
         with open(path, 'w', encoding='utf-8') as fp:
             save_buckets = []
@@ -99,6 +101,7 @@ class LSH(LSHInterface):
             json.dump({'num_bands': self.num_bands, 'buckets': save_buckets}, fp)
 
     def find_similar_multiple(self, X):
+
         M = self.sig.generate_signature(X)
 
         B = self.num_bands

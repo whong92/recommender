@@ -7,13 +7,19 @@ from tensorflow.contrib import predictor
 import numpy as np
 import scipy.sparse as sps
 import pandas as pd
+import json
 import tensorflow as tf
 import os
 
 
 class recommenderMF(Recommender):
 
-    def __init__(self, n_users, n_items, mode='train', model_path='.', lsh_path='.'):
+    def __init__(self, n_users, n_items, mode='train'
+                 # arguments for train mode
+                 , signature_t='CosineHash', lsh_t='LSHSimple'
+                 , mf_kwargs=None, signature_kwargs=None, lsh_kwargs=None
+                 # arguments for predict mode
+                 , model_path=None, lsh_path=None):
 
         super(recommenderMF, self).__init__(model_path)
 
@@ -22,39 +28,58 @@ class recommenderMF(Recommender):
         self.predictor = None
         self.n_users = n_users
         self.n_items = n_items
+        # only for training
+        self.signature_t = signature_t
+        self.lsh_t = lsh_t
+        self.mf_kwargs = mf_kwargs
+        self.signature_kwargs = signature_kwargs
+        self.lsh_kwargs = lsh_kwargs
         self.lsh = None
 
         if mode is 'predict':
+
+            for x in [model_path, lsh_path]:
+                assert x is not None
+
+            name_path = os.path.join(lsh_path, 'names.json')
             sig_path = os.path.join(lsh_path, 'signature.json')
             hash_path = os.path.join(lsh_path, 'hash.json')
-            self.lsh = MakeLSH('LSHSimple', MakeSignature('CosineHash', path=sig_path), path=hash_path)
+
+            with open(name_path, 'r', encoding='utf-8') as fp:
+                names = json.load(fp)
+
+            self.signature_t = names['sig']
+            self.lsh_t = names['lsh']
+            sig = MakeSignature(self.signature_t, path=sig_path)
+            self.lsh = MakeLSH(self.lsh_t, sig, path=hash_path)
             self.predictor = predictor.from_saved_model(model_path)
 
-    def train(self, u_in, i_in, r_in, u_in_test, i_in_test, r_in_test, model_path=None, lsh_path=None
-              , mf_f=20, mf_lamb=.001, mf_lr=.01, mf_decay=0.0
-              , signature='CosineHash', lsh='LSHSimple', signature_kwargs=None, lsh_kwargs=None):
+    def train(self, u_train, i_train, r_train, u_test, i_test, r_test, model_path=None, lsh_path=None):
 
         assert self.mode is 'train', "must be in train mode!"
 
-        self.estimator = MatrixFactorizer(self.n_users, self.n_items, mf_f, mf_lr, mf_lamb, mf_decay)
+        if self.mf_kwargs is None:
+            self.mf_kwargs = {'f': 20, 'lamb': .001, 'lr': .01, 'decay': 0.0}
+
+        self.estimator = MatrixFactorizer(self.n_users, self.n_items, **self.mf_kwargs)
 
         self.estimator.fit(
-            {'u_in': u_in, 'i_in': i_in},
-            r_in,
-            {'u_in': u_in_test, 'i_in': i_in_test},
-            r_in_test,
+            {'u_in': u_train, 'i_in': i_train}, r_train,
+            {'u_in': u_test, 'i_in': i_test}, r_test,
             numepochs=30,
         )
 
         # generate embeddings for all items, and insert into LSH
-        self.make_and_update_hash(lsh_path, signature, lsh, signature_kwargs, lsh_kwargs, None)
+        self._make_and_update_hash(lsh_path, self.signature_t, self.lsh_t
+                                  , self.signature_kwargs, self.lsh_kwargs, None)
         if model_path is not None:
             self.estimator.save(model_path)
 
-    def make_and_update_hash(self, lsh_path=None, signature='CosineHash', lsh='LSHSimple'
+    def _make_and_update_hash(self, lsh_path=None, signature_t='CosineHash', lsh_t='LSHSimple'
                              , signature_kwargs=None, lsh_kwargs=None, items=None):
         # rebuild lsh
-        if self.mode is'train':
+        if self.mode is 'train':
+            # TODO: use predict mode in Matrix Factorizer
             pred = predictor.from_estimator(self.estimator.model, MatrixFactorizer._predict_input_fn)
         else:
             pred = self.predictor
@@ -72,11 +97,14 @@ class recommenderMF(Recommender):
         if lsh_kwargs is None:
             lsh_kwargs = {'num_bands':5}
 
-        sig = MakeSignature(signature, **signature_kwargs)
-        self.lsh = MakeLSH(lsh, sig, **lsh_kwargs)
+        sig = MakeSignature(signature_t, **signature_kwargs)
+        self.lsh = MakeLSH(lsh_t, sig, **lsh_kwargs)
         self.lsh.insert(sps.csc_matrix(p['q'].transpose()),Xindex=items)
 
         if lsh_path is not None:
+            names = {'sig': self.signature_t, 'lsh': self.lsh_t}
+            with open(os.path.join(lsh_path, 'names.json'), 'w', encoding='utf-8') as fp:
+                json.dump(names, fp)
             sig.save(os.path.join(lsh_path, 'signature.json'))
             self.lsh.save(os.path.join(lsh_path, 'hash.json'))
 
@@ -144,12 +172,12 @@ if __name__=="__main__":
 
     # prediction
     df_mov = pd.read_csv('D:/PycharmProjects/recommender/data/ml-latest-small/movies.csv')
-    rmf = recommenderMF(N, M, mode='predict', model_path='./bla/1555182808', lsh_path='./bla')
+    rmf = recommenderMF(N, M, mode='predict', model_path='./bla/1555277760', lsh_path='./bla')
 
     thing = df.groupby('item').count()['user']
     thing = thing.loc[thing > 10]
 
-    rmf.make_and_update_hash(lsh_path='./bla', items=thing.index)
+    #rmf._make_and_update_hash(lsh_path='./bla', items=thing.index)
 
     user = 22
     user_df = df.loc[df.user_cat==user]
@@ -168,22 +196,26 @@ if __name__=="__main__":
     )
     sorted_items = sorted_items.merge(item_map, left_on='item_code', right_on='item_cat')
 
-    import matplotlib.pyplot as plt
+
     """
+    import matplotlib.pyplot as plt
+
     rating_counts = np.flip(np.sort(np.array(df.groupby('item').count()['user'], dtype=np.int32)))
     plt.subplot('211')
     plt.plot(np.linspace(0, len(rating_counts), len(rating_counts), dtype=np.int32), rating_counts, 'o')
     plt.subplot('212')
     plt.plot(np.linspace(0, len(rating_counts), len(rating_counts), dtype=np.int32), np.cumsum(rating_counts), 'o')
-    """
+
     plt.hist(sorted_items.rhat)
     plt.show()
+    """
 
     print(sorted_items.merge(df_mov, left_on='item', right_on='movieId')[:10])
     print(user_df.sort_values('rating').merge(df_mov, left_on='item', right_on='movieId')[:10])
 
     print(sorted_items.merge(df_mov, left_on='item', right_on='movieId')[-10:])
     print(user_df.sort_values('rating').merge(df_mov, left_on='item', right_on='movieId')[-10:])
+
 
 
 
