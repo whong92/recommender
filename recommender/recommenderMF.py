@@ -11,7 +11,7 @@ import tensorflow as tf
 import os
 
 
-class recommenderMF(Recommender):
+class RecommenderMF(Recommender):
 
     def __init__(self, mode='train'
                  # arguments for train mode
@@ -21,7 +21,7 @@ class recommenderMF(Recommender):
                  # arguments for predict mode
                  , model_path=None, lsh_path=None):
 
-        super(recommenderMF, self).__init__(model_path)
+        super(RecommenderMF, self).__init__(model_path)
 
         self.mode = mode
         self.estimator = None

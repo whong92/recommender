@@ -1,5 +1,5 @@
 from ..utils.utils import csv2df, splitDf
-from .recommenderMF import recommenderMF
+from .recommenderMF import RecommenderMF
 import tensorflow as tf
 import numpy as np
 
@@ -21,7 +21,7 @@ if __name__=="__main__":
     Items_test = D_test['item']
     Ratings_test = D_test['rating']
 
-    rmf = recommenderMF(mode='train', n_users=N, n_items=M)
+    rmf = RecommenderMF(mode='train', n_users=N, n_items=M)
     tf.logging.set_verbosity(tf.logging.INFO)
     rmf.train(
         np.array(Users_train, dtype=np.int32),

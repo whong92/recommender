@@ -1,5 +1,5 @@
 from ..utils.utils import csv2df
-from .recommenderMF import recommenderMF
+from .recommenderMF import RecommenderMF
 import pandas as pd
 import numpy as np
 
@@ -9,7 +9,7 @@ if __name__=="__main__":
 
     # prediction
     df_mov = pd.read_csv('/home/ong/Downloads/ml-latest-small/movies.csv')
-    rmf = recommenderMF(mode='predict', model_path='./bla/1555709857', lsh_path='./bla')
+    rmf = RecommenderMF(mode='predict', model_path='./bla/1555709857', lsh_path='./bla')
 
     thing = df.groupby('item').count()['user']
     thing = thing.loc[thing > 10]
