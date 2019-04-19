@@ -1,4 +1,4 @@
-from ..recommenderInterface import Recommender
+from .recommenderInterface import Recommender
 from .MatrixFactor import MatrixFactorizer
 from ..hash.LSH import MakeLSH
 from ..hash.Signature import MakeSignature
@@ -6,7 +6,6 @@ from ..utils.utils import csv2df, splitDf
 from tensorflow.contrib import predictor
 import numpy as np
 import scipy.sparse as sps
-import pandas as pd
 import json
 import tensorflow as tf
 import os
@@ -136,90 +135,6 @@ class recommenderMF(Recommender):
                             'i_in': np.arange(0, self.config['n_items'], dtype=np.int32)})
 
         return np.argsort(p['rhat']), np.sort(p['rhat'])
-
-
-
-if __name__=="__main__":
-
-    df, user_map, item_map, N, M = csv2df('D:/PycharmProjects/recommender/data/ml-latest-small/ratings.csv',
-                      'movieId', 'userId', 'rating', return_cat_mapping=True)
-    """
-    # training
-    train_test_split = 0.8
-    D_train, D_test = splitDf(df, train_test_split)
-
-    Users_train = D_train['user']
-    Items_train = D_train['item']
-    Ratings_train = D_train['rating']
-
-    print(len(D_train['rating']))
-
-    Users_test = D_test['user']
-    Items_test = D_test['item']
-    Ratings_test = D_test['rating']
-
-    rmf = recommenderMF(mode='train', n_users=N, n_items=M)
-    tf.logging.set_verbosity(tf.logging.INFO)
-    rmf.train(
-        np.array(Users_train, dtype=np.int32),
-        np.array(Items_train, dtype=np.int32),
-        np.array(Ratings_train, dtype=np.float64),
-        np.array(Users_test, dtype=np.int32),
-        np.array(Items_test, dtype=np.int32),
-        np.array(Ratings_test, dtype=np.float64),
-        model_path='./bla',
-        lsh_path='./bla'
-    )
-    """
-
-    # prediction
-    df_mov = pd.read_csv('D:/PycharmProjects/recommender/data/ml-latest-small/movies.csv')
-    rmf = recommenderMF(mode='predict', model_path='./bla/1555283393', lsh_path='./bla')
-
-    thing = df.groupby('item').count()['user']
-    thing = thing.loc[thing > 10]
-
-    rmf._make_hash()
-    rmf._update_hash(items=thing.index)
-    rmf._save_hash('./bla')
-
-    user = 55
-    user_df = df.loc[df.user_cat==user]
-
-    pred = rmf.predict(np.array(user_df['user']), np.array(user_df['item']))
-    user_df['rhat'] = pred['rhat']
-    user_df.rename(columns={'item':'item_code'}, inplace=True)
-    user_df = user_df.merge(item_map, left_on='item_code', right_on='item_cat')
-
-    sorted_items, sorted_score = rmf.recommend_lsh(user)
-    sorted_items = pd.DataFrame(
-        {
-            'item_code': sorted_items,
-            'rhat': sorted_score,
-        }
-    )
-    sorted_items = sorted_items.merge(item_map, left_on='item_code', right_on='item_cat')
-
-
-    """
-    import matplotlib.pyplot as plt
-
-    rating_counts = np.flip(np.sort(np.array(df.groupby('item').count()['user'], dtype=np.int32)))
-    plt.subplot('211')
-    plt.plot(np.linspace(0, len(rating_counts), len(rating_counts), dtype=np.int32), rating_counts, 'o')
-    plt.subplot('212')
-    plt.plot(np.linspace(0, len(rating_counts), len(rating_counts), dtype=np.int32), np.cumsum(rating_counts), 'o')
-
-    plt.hist(sorted_items.rhat)
-    plt.show()
-    """
-
-    print(sorted_items.merge(df_mov, left_on='item', right_on='movieId')[:10])
-    print(user_df.sort_values('rating').merge(df_mov, left_on='item', right_on='movieId')[:10])
-
-    print(sorted_items.merge(df_mov, left_on='item', right_on='movieId')[-10:])
-    print(user_df.sort_values('rating').merge(df_mov, left_on='item', right_on='movieId')[-10:])
-
 
 
 

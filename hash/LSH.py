@@ -54,7 +54,7 @@ class LSH(LSHInterface):
         M = self.sig.generate_signature(X)
         B = self.num_bands
         if Xindex is None:
-            Xindex = np.linspace(0, M.shape[1], M.shape[1], dtype=int)
+            Xindex = np.arange(0, M.shape[1], dtype=int)
         else:
             assert Xindex.shape[0]==M.shape[1], Xindex.dtype is int
 

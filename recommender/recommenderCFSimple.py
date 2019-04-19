@@ -1,4 +1,4 @@
-from recommenderInterface import Recommender
+from .recommenderInterface import Recommender
 from utils.utils import csv2df, df2umCSR, rmse, mean_nnz
 from sklearn.metrics.pairwise import cosine_similarity
 import scipy.sparse as sps
