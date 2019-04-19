@@ -5,7 +5,10 @@ import scipy.sparse as sps
 import numpy as np
 import matplotlib.pyplot as plt
 
+# TODO: standardize somewhat the input format for train and test across all recommenders
+
 class RecommenderCFSimple(Recommender):
+
     def __init__(self, model_file=None, k=10):
         super(RecommenderCFSimple, self).__init__(model_file)
         self.S = None # similarity matrix
@@ -17,6 +20,18 @@ class RecommenderCFSimple(Recommender):
         self.bx = None
         self.bi = None
         return
+
+    # TODO: use this to replace current input format of a csv filename, give user, item, rating array instead
+    @staticmethod
+    def to_sparse_matrices(u, i, r, M=None, N=None):
+        if M is None:
+            M = np.unique(i).shape[0]
+        if N is None:
+            N = np.unique(u).shape[0]
+        return {
+            'csr': sps.csr_matrix((r, (i, u)), shape=(M,N)),
+            'csc': sps.csc_matrix((r, (i, u)), shape=(M, N))
+        }
 
     def from_csv(self, csv, item, user, rating, train_test_split=0.8):
         df, self.N, self.M = csv2df(csv, item, user, rating)
