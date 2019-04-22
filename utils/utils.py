@@ -32,14 +32,15 @@ def getCatMap(chunks):
     user_map = {}
     item_map = {}
     def populate_maps(x):
-        x = int(x)
-        if x not in user_map:
-            user_map[x] = len(user_map)
-        if x not in item_map:
-            item_map[x] = len(item_map)
+        u = int(x['user'])
+        i = int(x['item'])
+        if u not in user_map:
+            user_map[u] = len(user_map)
+        if i not in item_map:
+            item_map[i] = len(item_map)
     for chunk in chunks:
         chunk.apply(
-            lambda x: populate_maps(x['user']),
+            lambda x: populate_maps(x),
             axis=1
         )
     return user_map, item_map
@@ -54,16 +55,33 @@ def getChunk(file, item, user, rating, chunksize=1000):
         }, inplace=True)
         yield chunk
 
-def procChunk(chunk, user_map, item_map):
-    user_map_df = pd.DataFrame.from_dict(
-        user_map, orient='index', columns=['user_cat']
-    )
-    item_map_df = pd.DataFrame.from_dict(
-        item_map, orient='index', columns=['item_cat']
-    )
+def procChunk(chunk, user_map_df, item_map_df):
     chunk = chunk.merge(user_map_df, left_on='user', right_index=True)
     chunk = chunk.merge(item_map_df, left_on='item', right_index=True)
+    chunk['user'] = chunk['user_cat']
+    chunk['item'] = chunk['item_cat']
     return chunk
+
+def procSingleRow(row, user_map, item_map):
+    row['user'] = user_map[int(row.iloc[0]['user'])]
+    row['item'] = item_map[int(row.iloc[0]['item'])]
+    return row
+
+def tf_serialize_example(user, item, rating):
+    tf_string = tf.py_func(
+        serializeExample,
+        (user,item,rating),
+        tf.string
+    )
+    return tf.reshape(tf_string, ())
+
+def serializeExample(user, item, rating):
+    feature = {
+        'user': tf.train.Feature(int64_list=tf.train.Int64List(value=[user])),
+        'item': tf.train.Feature(int64_list=tf.train.Int64List(value=[item])),
+        'rating': tf.train.Feature(float_list=tf.train.FloatList(value=[rating])),
+    }
+    return tf.train.Example(features=tf.train.Features(feature=feature)).SerializeToString()
 
 def df2umCSR(df, M=None, N=None):
     data = np.array(df['rating'])
