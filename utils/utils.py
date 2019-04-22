@@ -28,6 +28,43 @@ def csv2df(file, item, user, rating, return_cat_mapping=False, **kwargs):
 
     return df, np.unique(df['user']).shape[0], np.unique(df['item']).shape[0]
 
+def getCatMap(chunks):
+    user_map = {}
+    item_map = {}
+    def populate_maps(x):
+        x = int(x)
+        if x not in user_map:
+            user_map[x] = len(user_map)
+        if x not in item_map:
+            item_map[x] = len(item_map)
+    for chunk in chunks:
+        chunk.apply(
+            lambda x: populate_maps(x['user']),
+            axis=1
+        )
+    return user_map, item_map
+
+def getChunk(file, item, user, rating, chunksize=1000):
+    dfReader = pd.read_csv(file, usecols=[item,user,rating], iterator=True, chunksize=chunksize)
+    for chunk in dfReader:
+        chunk.rename(columns={
+            item: 'item',
+            user: 'user',
+            rating: 'rating',
+        }, inplace=True)
+        yield chunk
+
+def procChunk(chunk, user_map, item_map):
+    user_map_df = pd.DataFrame.from_dict(
+        user_map, orient='index', columns=['user_cat']
+    )
+    item_map_df = pd.DataFrame.from_dict(
+        item_map, orient='index', columns=['item_cat']
+    )
+    chunk = chunk.merge(user_map_df, left_on='user', right_index=True)
+    chunk = chunk.merge(item_map_df, left_on='item', right_index=True)
+    return chunk
+
 def df2umCSR(df, M=None, N=None):
     data = np.array(df['rating'])
     row = np.array(df['item']).astype(int)
@@ -73,3 +110,6 @@ def makeTfDataset(input, batchsize, numepochs):
     iterator = ds.make_initializable_iterator()
     next = iterator.get_next()
     return iterator, next
+
+def csv2TfRecords(in_filename, out_filename):
+    df, N, M = csv2df(in_filename, out_filename)
