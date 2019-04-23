@@ -22,7 +22,7 @@ def generate_single_row(rows, user_map, item_map):
 
 if __name__=="__main__":
     tf.enable_eager_execution()
-    """
+
     csvChunks = getChunk('D:\\PycharmProjects\\recommender\\data\\ml-latest-small\\ratings.csv',
                          'movieId', 'userId', 'rating', chunksize=10000)
 
@@ -33,7 +33,8 @@ if __name__=="__main__":
     item_map_df = pd.DataFrame.from_dict(
         item_map, orient='index', columns=['item_cat']
     )
-
+    print(len(item_map))
+    """
     csvChunks = getChunk('D:\\PycharmProjects\\recommender\\data\\ml-latest-small\\ratings.csv',
                          'movieId', 'userId', 'rating', chunksize=50000)
 
@@ -49,17 +50,19 @@ if __name__=="__main__":
         writer.write(ser_dataset)
         i += 1
     """
+    """
 
-    filenames = ['bla{:03d}.tfrecord'.format(i) for i in range(3)]
+    filenames = ['D:\\PycharmProjects\\recommender\\bla{:03d}.tfrecord'.format(i) for i in range(3)]
     raw_dataset = tf.data.TFRecordDataset(filenames)
     feature_description = {
         'user': tf.FixedLenFeature([], tf.int64, default_value=0),
         'item': tf.FixedLenFeature([], tf.int64, default_value=0),
         'rating': tf.FixedLenFeature([], tf.float32, default_value=0),
     }
-    raw_dataset = raw_dataset.shuffle(1000)
-    raw_dataset = raw_dataset.batch(10)
+    raw_dataset = raw_dataset.shuffle(10000)
+    raw_dataset = raw_dataset.repeat(10).batch(32)
     parsed_dataset = raw_dataset.map(lambda x: tf.parse_example(x, feature_description))
-
+    print(parsed_dataset)
     for record in parsed_dataset.take(10):
         print(repr(record))
+    """
