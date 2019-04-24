@@ -72,23 +72,23 @@ class RecommenderMF(Recommender):
         self.input_format = 'tfr_paths'
         self.data = (train_paths, test_paths)
 
-    def train(self, model_path=None, lsh_path=None):
+    def train(self):
 
         assert self.mode is 'train', "must be in train mode!"
 
         if self.input_format is 'arrays':
             self.estimator.fit_array_input(*self.data, numepochs=30,)
         elif self.input_format is 'tfr_paths':
-            self.estimator.fit_tfr_input(*self.data, numepochs=30,)
+            self.estimator.fit_tfr_input(*self.data, numepochs=1,)
         else:
             raise TypeError("No input configured!")
 
         # generate embeddings for all items, and insert into LSH
         self._update_hash(None)
-        if model_path is not None:
-            self.estimator.save(model_path)
-        if lsh_path is not None:
-            self._save_hash(lsh_path)
+
+    def save(self, path):
+        self.estimator.save(path)
+        self._save_hash(path)
 
     def _make_hash(self, signature_t='CosineHash', lsh_t='LSHSimple',
                    signature_kwargs=None, lsh_kwargs=None):

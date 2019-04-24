@@ -126,6 +126,15 @@ class RecommenderCFSimple(Recommender):
 
         return rpred
 
+    def recommend(self, u_in):
+        # manual prediction by enumerating all stuff
+        if self.Ud is None:
+            p = self._compute_weighted_score(u_in)
+        else:
+            p = self.Ud[:, u_in]
+
+        return np.argsort(p), np.sort(p)
+
 if __name__=="__main__":
 
     def main(k):

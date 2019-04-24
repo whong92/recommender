@@ -28,6 +28,7 @@ if __name__=="__main__":
     rmf = RecommenderMF(mode='train', n_users=N, n_items=M)
     tf.logging.set_verbosity(tf.logging.INFO)
     """
+    # array input format - onnly for smaller datasets
     rmf.input_array_data(
         np.array(Users_train, dtype=np.int32),
         np.array(Items_train, dtype=np.int32),
@@ -41,7 +42,5 @@ if __name__=="__main__":
         ['D:/PycharmProjects/recommender/data/tmp/bla_train000.tfrecord'],
         ['D:/PycharmProjects/recommender/data/tmp/bla_test000.tfrecord']
     )
-    rmf.train(
-        model_path='./bla',
-        lsh_path='./bla'
-    )
+    rmf.train()
+    rmf.save('D:/PycharmProjects/recommender/models/model/')
