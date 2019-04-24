@@ -29,8 +29,11 @@ def csv2df(file, item, user, rating, return_cat_mapping=False, **kwargs):
     return df, np.unique(df['user']).shape[0], np.unique(df['item']).shape[0]
 
 def getCatMap(chunks):
+
     user_map = {}
     item_map = {}
+    tot_len = 0
+
     def populate_maps(x):
         u = int(x['user'])
         i = int(x['item'])
@@ -38,12 +41,16 @@ def getCatMap(chunks):
             user_map[u] = len(user_map)
         if i not in item_map:
             item_map[i] = len(item_map)
+
     for chunk in chunks:
+
         chunk.apply(
             lambda x: populate_maps(x),
             axis=1
         )
-    return user_map, item_map
+        tot_len += len(chunk)
+
+    return user_map, item_map, tot_len
 
 def getChunk(file, item, user, rating, chunksize=1000):
     dfReader = pd.read_csv(file, usecols=[item,user,rating], iterator=True, chunksize=chunksize)

@@ -26,30 +26,53 @@ if __name__=="__main__":
     csvChunks = getChunk('D:\\PycharmProjects\\recommender\\data\\ml-latest-small\\ratings.csv',
                          'movieId', 'userId', 'rating', chunksize=10000)
 
-    user_map, item_map = getCatMap(csvChunks)
+    user_map, item_map, ds_len = getCatMap(csvChunks)
     user_map_df = pd.DataFrame.from_dict(
         user_map, orient='index', columns=['user_cat']
     )
     item_map_df = pd.DataFrame.from_dict(
         item_map, orient='index', columns=['item_cat']
     )
-    print(len(item_map))
-    """
+
+    train_len = int(0.8 * ds_len)
+    test_len = int(0.2 * ds_len)
+
+
     csvChunks = getChunk('D:\\PycharmProjects\\recommender\\data\\ml-latest-small\\ratings.csv',
                          'movieId', 'userId', 'rating', chunksize=50000)
 
     i = 0
+    j = 0
+    train_len_so_far = 0
 
     for (users,items,ratings) in tqdm(generate_tensor_chunk(csvChunks, user_map_df, item_map_df)):
 
-        features_dataset = tf.data.Dataset.from_tensor_slices((users, items, ratings))
-        ser_dataset = features_dataset.map(tf_serialize_example)
+        cur_len = len(users)
+        test_offset = int(0.8*cur_len)
+        features_dataset = tf.data.Dataset.from_tensor_slices((users, items, ratings)).shuffle(cur_len)
 
-        filename = 'bla{:03d}.tfrecord'.format(i)
-        writer = tf.data.experimental.TFRecordWriter(filename)
-        writer.write(ser_dataset)
-        i += 1
-    """
+        for mode in ['train', 'test']:
+
+            if mode is 'train' and test_offset==0:
+                continue
+            if mode is 'test' and test_offset==cur_len:
+                continue
+
+            if mode is 'train':
+                active_dataset = features_dataset.take(test_offset)
+                filename = 'bla_train{:03d}.tfrecord'.format(i)
+                i += 1
+            else:
+                active_dataset = features_dataset.skip(test_offset)
+                active_dataset = active_dataset.take(len(users) - test_offset)
+                filename = 'bla_test{:03d}.tfrecord'.format(j)
+                j += 1
+
+            ser_dataset = active_dataset.map(tf_serialize_example)
+            writer = tf.data.experimental.TFRecordWriter(filename)
+            writer.write(ser_dataset)
+
+
     """
 
     filenames = ['D:\\PycharmProjects\\recommender\\bla{:03d}.tfrecord'.format(i) for i in range(3)]
