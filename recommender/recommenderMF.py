@@ -58,16 +58,30 @@ class RecommenderMF(Recommender):
             self.lsh = MakeLSH(lsh_t, self.sig, path=hash_path)
             self.predictor = predictor.from_saved_model(model_path)
 
-    def train(self, u_train, i_train, r_train, u_test, i_test, r_test,
-              model_path=None, lsh_path=None):
+            self.data = None
+            self.input_format = None
+
+    def input_array_data(self, u_train, i_train, r_train, u_test, i_test, r_test):
+        self.input_format = 'arrays'
+        self.data = (
+            {'user': u_train, 'item': i_train, 'rating': r_train},
+            {'user': u_test, 'item': i_test, 'rating': r_test}
+        )
+
+    def input_tfr_paths(self, train_paths, test_paths):
+        self.input_format = 'tfr_paths'
+        self.data = (train_paths, test_paths)
+
+    def train(self, model_path=None, lsh_path=None):
 
         assert self.mode is 'train', "must be in train mode!"
 
-        self.estimator.fit(
-            {'u_in': u_train, 'i_in': i_train}, r_train,
-            {'u_in': u_test, 'i_in': i_test}, r_test,
-            numepochs=30,
-        )
+        if self.input_format is 'arrays':
+            self.estimator.fit_array_input(*self.data, numepochs=30,)
+        elif self.input_format is 'tfr_paths':
+            self.estimator.fit_tfr_input(*self.data, numepochs=30,)
+        else:
+            raise TypeError("No input configured!")
 
         # generate embeddings for all items, and insert into LSH
         self._update_hash(None)
@@ -98,8 +112,8 @@ class RecommenderMF(Recommender):
             items = np.arange(0, self.config['n_items'], dtype=np.int32)
 
         p = pred(
-            {'u_in': np.zeros(shape=(len(items),), dtype=np.int32),
-             'i_in': items
+            {'user': np.zeros(shape=(len(items),), dtype=np.int32),
+             'item': items
              })
         self.lsh.insert(sps.csc_matrix(p['q'].transpose()),Xindex=items)
 
@@ -112,27 +126,27 @@ class RecommenderMF(Recommender):
     def predict(self, u_in, i_in):
 
         assert self.mode is 'predict'
-        return self.predictor({'u_in': u_in, 'i_in': i_in})
+        return self.predictor({'user': u_in, 'item': i_in})
 
     def recommend_lsh(self, u_in):
         # recommendation using lsh
         assert type(u_in) is int
 
-        p = self.predictor({'u_in': np.array([u_in], dtype=np.int32),
-                        'i_in': np.array([0], dtype=np.int32)})
+        p = self.predictor({'user': np.array([u_in], dtype=np.int32),
+                        'item': np.array([0], dtype=np.int32)})
 
         bla = self.lsh.find_similar(
             sps.csc_matrix(np.expand_dims(p['p'][0,:], axis=1))
         )
         idx = np.array(list(bla), dtype=np.int32)
-        p = self.predictor({'u_in': np.tile(np.array([u_in], dtype=np.int32), len(idx)),
-                            'i_in': idx})
+        p = self.predictor({'user': np.tile(np.array([u_in], dtype=np.int32), len(idx)),
+                            'item': idx})
         return idx[np.argsort(p['rhat'])], np.sort(p['rhat'])
 
     def recommend(self, u_in):
         # manual prediction by enumerating all stuff
-        p = self.predictor({'u_in': np.tile(np.array([u_in], dtype=np.int32), self.config['n_items']),
-                            'i_in': np.arange(0, self.config['n_items'], dtype=np.int32)})
+        p = self.predictor({'user': np.tile(np.array([u_in], dtype=np.int32), self.config['n_items']),
+                            'item': np.arange(0, self.config['n_items'], dtype=np.int32)})
 
         return np.argsort(p['rhat']), np.sort(p['rhat'])
 

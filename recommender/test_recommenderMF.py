@@ -4,12 +4,13 @@ import pandas as pd
 import numpy as np
 
 if __name__=="__main__":
-    df, user_map, item_map, N, M = csv2df('/home/ong/Downloads/ml-latest-small/ratings.csv',
+    src_csv = 'D:\\PycharmProjects\\recommender\\data\\ml-latest-small\\ratings.csv'
+    df, user_map, item_map, N, M = csv2df(src_csv,
                                           'movieId', 'userId', 'rating', return_cat_mapping=True)
 
     # prediction
-    df_mov = pd.read_csv('/home/ong/Downloads/ml-latest-small/movies.csv')
-    rmf = RecommenderMF(mode='predict', model_path='./bla/1555709857', lsh_path='./bla')
+    df_mov = pd.read_csv('D:\\PycharmProjects\\recommender\\data\\ml-latest-small\\movies.csv')
+    rmf = RecommenderMF(mode='predict', model_path='./bla/1556115306', lsh_path='./bla')
 
     thing = df.groupby('item').count()['user']
     thing = thing.loc[thing > 10]

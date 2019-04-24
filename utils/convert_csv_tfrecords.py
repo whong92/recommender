@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import tensorflow as tf
 from tqdm import tqdm
+import os
 
 def generate_tensor_chunk(chunks, user_map_df, item_map_df):
     for chunk in chunks:
@@ -22,9 +23,15 @@ def generate_single_row(rows, user_map, item_map):
 
 if __name__=="__main__":
     tf.enable_eager_execution()
+    src_csv = 'D:\\PycharmProjects\\recommender\\data\\ml-latest-small\\ratings.csv'
+    dst_folder = 'D:\\PycharmProjects\\recommender\\data\\tmp'
 
-    csvChunks = getChunk('D:\\PycharmProjects\\recommender\\data\\ml-latest-small\\ratings.csv',
-                         'movieId', 'userId', 'rating', chunksize=10000)
+    if not os.path.exists(dst_folder):
+        os.mkdir(dst_folder )
+
+    chunksize = 200000
+
+    csvChunks = getChunk(src_csv, 'movieId', 'userId', 'rating', chunksize=chunksize)
 
     user_map, item_map, ds_len = getCatMap(csvChunks)
     user_map_df = pd.DataFrame.from_dict(
@@ -33,13 +40,13 @@ if __name__=="__main__":
     item_map_df = pd.DataFrame.from_dict(
         item_map, orient='index', columns=['item_cat']
     )
+    user_map_df.to_csv(os.path.join(dst_folder, 'user_map_df.csv'))
+    item_map_df.to_csv(os.path.join(dst_folder, 'item_map_df.csv'))
 
     train_len = int(0.8 * ds_len)
     test_len = int(0.2 * ds_len)
 
-
-    csvChunks = getChunk('D:\\PycharmProjects\\recommender\\data\\ml-latest-small\\ratings.csv',
-                         'movieId', 'userId', 'rating', chunksize=50000)
+    csvChunks = getChunk(src_csv, 'movieId', 'userId', 'rating', chunksize=chunksize)
 
     i = 0
     j = 0
@@ -60,21 +67,19 @@ if __name__=="__main__":
 
             if mode is 'train':
                 active_dataset = features_dataset.take(test_offset)
-                filename = 'bla_train{:03d}.tfrecord'.format(i)
+                filename = os.path.join(dst_folder, 'bla_train{:03d}.tfrecord'.format(i))
                 i += 1
             else:
                 active_dataset = features_dataset.skip(test_offset)
                 active_dataset = active_dataset.take(len(users) - test_offset)
-                filename = 'bla_test{:03d}.tfrecord'.format(j)
+                filename = os.path.join(dst_folder, 'bla_test{:03d}.tfrecord'.format(j))
                 j += 1
 
             ser_dataset = active_dataset.map(tf_serialize_example)
             writer = tf.data.experimental.TFRecordWriter(filename)
             writer.write(ser_dataset)
 
-
     """
-
     filenames = ['D:\\PycharmProjects\\recommender\\bla{:03d}.tfrecord'.format(i) for i in range(3)]
     raw_dataset = tf.data.TFRecordDataset(filenames)
     feature_description = {

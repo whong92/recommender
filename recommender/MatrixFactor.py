@@ -7,8 +7,8 @@ class MatrixFactorizer(object):
     @staticmethod
     def _model_fn(features, labels, mode, params):
 
-        u_in = tf.cast(features['user'], tf.int32, name='u_in')
-        i_in = tf.cast(features['item'], tf.int32, name='i_in')
+        u_in = tf.cast(features['user'], tf.int32)
+        i_in = tf.cast(features['item'], tf.int32)
 
         N = params['N']
         M = params['M']
@@ -32,7 +32,7 @@ class MatrixFactorizer(object):
             predictions = {'rhat': rhat, 'p':p, 'q':q}
             return tf.estimator.EstimatorSpec(mode, predictions=predictions)
 
-        r_in = tf.cast(features['rating'], tf.float64, name='r_in')
+        r_in = tf.cast(features['rating'], tf.float64)
 
         lamb = params['lamb']
         lr = params['lr']
@@ -40,7 +40,7 @@ class MatrixFactorizer(object):
 
         mse = tf.losses.mean_squared_error(r_in, rhat)
         reg = tf.nn.l2_loss(p) + tf.nn.l2_loss(q) + tf.nn.l2_loss(bu) + tf.nn.l2_loss(bi)
-        loss = tf.cast(mse, tf.float64, name ='mse') + tf.reduce_mean(lamb * reg)
+        loss = tf.cast(mse, tf.float64) + tf.reduce_mean(lamb * reg)
 
         if mode == tf.estimator.ModeKeys.EVAL:
             metrics = {'rmse': tf.metrics.mean_squared_error(r_in, rhat)}
@@ -52,14 +52,9 @@ class MatrixFactorizer(object):
         return tf.estimator.EstimatorSpec(mode, loss=loss, train_op=opt)
 
     @staticmethod
-    def _np_input_fn(features, labels=None, batchsize=32, numepochs=30):
+    def _np_input_fn(features, batchsize=32, numepochs=30):
         features = dict(features)
-        if labels is None:
-            # No labels, use only features.
-            inputs = features
-        else:
-            inputs = (features, labels)
-        dataset = tf.data.Dataset.from_tensor_slices(inputs)
+        dataset = tf.data.Dataset.from_tensor_slices(features)
         dataset = dataset.repeat(numepochs).batch(batchsize)
         return dataset
 
@@ -79,8 +74,8 @@ class MatrixFactorizer(object):
     @staticmethod
     def _predict_input_fn():
         input = {
-            'u_in': tf.placeholder(dtype=tf.int32, shape=(None,)),
-            'i_in': tf.placeholder(dtype=tf.int32, shape=(None,)),
+            'user': tf.placeholder(dtype=tf.int32, shape=(None,)),
+            'item': tf.placeholder(dtype=tf.int32, shape=(None,)),
         }
         return tf.estimator.export.ServingInputReceiver(input, input)
 
@@ -93,33 +88,26 @@ class MatrixFactorizer(object):
             })
         return
 
-    """
-    def fit(self, features_train, labels_train, feature_test, labels_test, batchsize=32, numepochs=10):
-        train_steps = len(labels_train) * numepochs // batchsize
+
+    def fit_array_input(self, features_train, feature_test, batchsize=32, numepochs=10):
         self.model.train(
-            input_fn=lambda:MatrixFactorizer._input_fn(features_train, labels_train, batchsize, numepochs),
-            steps=train_steps
+            input_fn=lambda:MatrixFactorizer._np_input_fn(features_train, batchsize, numepochs),
         )
         # Evaluate the model.
         eval_result = self.model.evaluate(
-            input_fn=lambda: MatrixFactorizer._input_fn(feature_test, labels_test, batchsize, 1),
+            input_fn=lambda: MatrixFactorizer._np_input_fn(feature_test, batchsize, 1),
         )
         print('Test: RMSE: %f ' % np.sqrt(eval_result['rmse']))
-    """
 
-    def fit(self, train_filenames, test_filenames, batchsize=32, numepochs=10):
-        train_steps = 80000 #100000 * numepochs // batchsize
-        print(numepochs)
+
+    def fit_tfr_input(self, train_filenames, test_filenames, batchsize=32, numepochs=10):
         self.model.train(
             input_fn=lambda: MatrixFactorizer._tfr_input_fn(train_filenames, batchsize, numepochs),
-            steps=train_steps,
-            hooks=[tf.train.LoggingTensorHook(['mse'], every_n_iter=100)]
         )
 
         # Evaluate the model.
         eval_result = self.model.evaluate(
-            input_fn=lambda: MatrixFactorizer._tfr_input_fn(test_filenames, 20000, 1),
-            hooks=[tf.train.LoggingTensorHook(['mse'], every_n_iter=1)]
+            input_fn=lambda: MatrixFactorizer._tfr_input_fn(test_filenames, 1000, 1),
         )
         print('Test: RMSE: %f ' % np.sqrt(eval_result['rmse']))
 
@@ -130,8 +118,16 @@ class MatrixFactorizer(object):
 
 if __name__=="__main__":
 
-
+    # hyperparamaters
     train_test_split = 0.8
+    f = 10  # latent factor dimensionality
+    lamb = 0.01
+    batchsize = 32
+    numepochs = 10
+    lr = 0.01
+    decay = 0.0
+
+    # load data
     df, N, M = csv2df('D:/PycharmProjects/recommender/data/ml-latest-small/ratings.csv', 'movieId', 'userId', 'rating')
     D_train, D_test = splitDf(df, train_test_split)
     print(N, M)
@@ -145,27 +141,28 @@ if __name__=="__main__":
     Items_test = D_test['item']
     Ratings_test = D_test['rating']
 
-    f = 10  # latent factor dimensionality
-    lamb = 0.01
-    batchsize = 32
-    numepochs = 10
-    lr = 0.01
-    decay = 0.0
+    """
+    import pandas as pd
+    user_map_df = pd.DataFrame.from_csv('D:/PycharmProjects/recommender/data/tmp/user_map_df.csv')
+    item_map_df = pd.DataFrame.from_csv('D:/PycharmProjects/recommender/data/tmp/item_map_df.csv')
+    N = len(user_map_df)
+    M = len(item_map_df)
+    """
 
     mf = MatrixFactorizer(N, M, f, lr, lamb, decay)
     tf.logging.set_verbosity(tf.logging.INFO)
+
+    mf.fit_array_input(
+        {'user':np.array(D_train['user'], dtype=np.int32), 'item':np.array(D_train['item'], dtype=np.int32), 'rating':np.array(D_train['rating'], dtype=np.float64)},
+        {'user': np.array(D_test['user'], dtype=np.int32), 'item':np.array(D_test['item'], dtype=np.int32), 'rating':np.array(D_test['rating'], dtype=np.float64)},
+    )
+
     """
-    mf.fit(
-        {'u_in':np.array(D_train['user'], dtype=np.int32), 'i_in':np.array(D_train['item'], dtype=np.int32)},
-        np.array(D_train['rating'], dtype=np.float64),
-        {'u_in': np.array(D_test['user'], dtype=np.int32), 'i_in':np.array(D_test['item'], dtype=np.int32)},
-        np.array(D_test['rating'], dtype=np.float64)
+    mf.fit_tfr_input(
+        ['D:/PycharmProjects/recommender/data/tmp/bla_train{:03d}.tfrecord'.format(i) for i in range(1)],
+        ['D:/PycharmProjects/recommender/data/tmp/bla_test{:03d}.tfrecord'.format(i) for i in range(1)]
     )
     """
-    mf.fit(
-        ['D:\\PycharmProjects\\bla_train{:03d}.tfrecord'.format(i) for i in range(3)],
-        ['D:\\PycharmProjects\\bla_test{:03d}.tfrecord'.format(i) for i in range(3)]
-    )
 
     mf.save("./")
 
