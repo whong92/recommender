@@ -1,5 +1,5 @@
 from .recommenderInterface import Recommender
-from utils.utils import csv2df, df2umCSR, rmse, mean_nnz
+from ..utils.utils import csv2df, rmse, mean_nnz, splitDf
 from sklearn.metrics.pairwise import cosine_similarity
 import scipy.sparse as sps
 import numpy as np
@@ -9,12 +9,12 @@ import matplotlib.pyplot as plt
 
 class RecommenderCFSimple(Recommender):
 
-    def __init__(self, model_file=None, k=10):
+    def __init__(self, model_file=None, k=10, n_users=0, n_items=0):
         super(RecommenderCFSimple, self).__init__(model_file)
         self.S = None # similarity matrix
         self.Ud = None # dense Utility matrix
-        self.N = 0
-        self.M = 0
+        self.N = n_users
+        self.M = n_items
         self.k = k
         self.mu = None
         self.bx = None
@@ -30,22 +30,12 @@ class RecommenderCFSimple(Recommender):
             N = np.unique(u).shape[0]
         return {
             'csr': sps.csr_matrix((r, (i, u)), shape=(M,N)),
-            'csc': sps.csc_matrix((r, (i, u)), shape=(M, N))
+            'csc': sps.csc_matrix((r, (i, u)), shape=(M,N))
         }
 
-    def from_csv(self, csv, item, user, rating, train_test_split=0.8):
-        df, self.N, self.M = csv2df(csv, item, user, rating)
-        perm = np.random.permutation(len(df))
-        um_train = df2umCSR(df.iloc[perm[:int(len(df)*train_test_split)]], self.M, self.N)
-        um_test = df2umCSR(df.iloc[perm[int(len(df) * train_test_split):]], self.M, self.N)
-        self.training_data = {
-            'csr': sps.csr_matrix(um_train, shape=(self.M, self.N)),
-            'csc': sps.csc_matrix(um_train, shape=(self.M, self.N))
-        }
-        self.validation_data = {
-            'csr': sps.csr_matrix(um_test, shape=(self.M, self.N)),
-            'csc': sps.csc_matrix(um_test, shape=(self.M, self.N))
-        }
+    def input_array_data(self, u_train, i_train, r_train, u_test, i_test, r_test):
+        self.training_data = RecommenderCFSimple.to_sparse_matrices(u_train, i_train, r_train, self.M, self.N)
+        self.validation_data = RecommenderCFSimple.to_sparse_matrices(u_test, i_test, r_test, self.M, self.N)
 
     def _compute_similarity_matrix(self):
         Ucsr = self.training_data['csr']
@@ -137,9 +127,34 @@ class RecommenderCFSimple(Recommender):
         return rpred
 
 if __name__=="__main__":
+
     def main(k):
-        rcf = RecommenderCFSimple(k=k)
-        rcf.from_csv('D:/PycharmProjects/recommender/data/ml-latest-small/ratings.csv', 'userId', 'movieId', 'rating')
+
+        df, user_map, item_map, N, M = csv2df('D:/PycharmProjects/recommender/data/ml-latest-small/ratings.csv',
+                                              'movieId', 'userId', 'rating', return_cat_mapping=True)
+        # training
+        train_test_split = 0.8
+        D_train, D_test = splitDf(df, train_test_split)
+
+        Users_train = D_train['user']
+        Items_train = D_train['item']
+        Ratings_train = D_train['rating']
+
+        Users_test = D_test['user']
+        Items_test = D_test['item']
+        Ratings_test = D_test['rating']
+
+        print(len(D_test), len(D_train), len(df))
+
+        rcf = RecommenderCFSimple(k=k, n_users=N, n_items=M)
+        rcf.input_array_data(
+            np.array(Users_train, dtype=np.int32),
+            np.array(Items_train, dtype=np.int32),
+            np.array(Ratings_train, dtype=np.float64),
+            np.array(Users_test, dtype=np.int32),
+            np.array(Items_test, dtype=np.int32),
+            np.array(Ratings_test, dtype=np.float64),
+        )
         test_error, es = rcf.train(precompute_ud=True)
         print("k : {0} , test error {1}".format(k, test_error))
         plt.semilogx(k, test_error, 'bo')
@@ -160,7 +175,7 @@ if __name__=="__main__":
     num_experiments = 1
     for i in range(num_experiments):
         for k in [2, 5, 10, 20, 50, 100, 150, 200]:
-                main(k)
+            main(k)
 
     plt.show()
 

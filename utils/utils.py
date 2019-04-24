@@ -125,7 +125,7 @@ def splitDf(df, train_test_split=0.8):
     assert train_test_split > 0
     perm = np.random.permutation(len(df))
     train_df = df.iloc[perm[:int(len(df) * train_test_split)]]
-    test_df = df.iloc[perm[:int(len(df) * train_test_split)]]
+    test_df = df.iloc[perm[int(len(df) * train_test_split):]]
     return train_df, test_df
 
 def makeTfDataset(input, batchsize, numepochs):
