@@ -141,6 +141,15 @@ class LSHDB(LSHInterface):
             "number of buckets must divide number of rows! B = {0}, R = {1}".format(B, M.shape[0])
         R = int(M.shape[0]/B)
 
+        feature_store = 'features'
+        for i in range(X.shape[1]):
+            feats = self.db[feature_store]
+            feats.update(
+                    {'_id': int(Xindex[i])},
+                    {'$set': {'feature': list(np.squeeze(np.array(X[:,i].todense())))}},
+                    upsert=True,
+                )
+
         for b in range(self.num_bands):
             band_name = 'band{:03d}'.format(b)
             band = self.db[band_name]
