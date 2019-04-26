@@ -9,5 +9,8 @@ class Recommender:
     def train(self, *args, **kwargs):
         raise NotImplementedError
 
-    def predict(self, *args, **kwargs):
+    def predict(self, items, users):
+        raise NotImplementedError
+
+    def recommend(self, user):
         raise NotImplementedError

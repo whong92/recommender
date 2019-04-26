@@ -3,6 +3,9 @@ import numpy as np
 from collections import defaultdict
 import json
 from zlib import adler32
+import pymongo as pm
+from .Signature import MakeSignature
+from bson.objectid import ObjectId
 
 def MakeLSH(name, *args, **kwargs):
     switcher = {
@@ -118,6 +121,73 @@ class LSH(LSHInterface):
 
 
 class LSHDB(LSHInterface):
-    def __init__(self, dbconn=None):
+
+    def __init__(self, sig, num_bands=10, dbconn=None, db=None):
         super(LSHDB, self).__init__()
-        self.dbconn=dbconn
+        self.dbclient = pm.MongoClient(dbconn)
+        self.db = self.dbclient[db]
+        self.num_bands = num_bands
+        self.sig = sig
+
+    def insert(self, X, Xindex=None):
+
+        M = self.sig.generate_signature(X)
+        B = self.num_bands
+        if Xindex is None:
+            Xindex = np.arange(0, M.shape[1], dtype=int)
+        else:
+            assert Xindex.shape[0]==M.shape[1], Xindex.dtype is int
+
+        assert B < M.shape[0] and M.shape[0]%B==0, \
+            "number of buckets must divide number of rows! B = {0}, R = {1}".format(B, M.shape[0])
+        R = int(M.shape[0]/B)
+
+        for b in range(self.num_bands):
+            band_name = 'band{:03d}'.format(b)
+            band = self.db[band_name]
+
+            H = np.apply_along_axis(
+                lambda x: np.int64(adler32(x.tobytes())) % NUM_BUCKETS,
+                axis=0, arr=M[b * R:(b + 1) * R, :]
+            )
+
+            for i, h in enumerate(H):
+                bucket_cursor = band.find({'_id': int(h)})
+                bucket_vals = []
+                for bucket in bucket_cursor:
+                    bucket_vals = bucket['vals']
+                bucket_vals.append(int(Xindex[i]))
+                band.update(
+                    {'_id': int(h)},
+                    {'$set': {'vals': bucket_vals}},
+                    upsert=True,
+                )
+
+    def find_similar(self, X):
+        M = self.sig.generate_signature(X)
+        B = self.num_bands
+        R = int(M.shape[0] / B)
+        sim_set = set()
+        for b in range(self.num_bands):
+            H = np.apply_along_axis(
+                lambda x : np.int64(adler32(x.tobytes()))%NUM_BUCKETS,
+                axis=0,arr=M[b*R:(b+1)*R,:]
+            )
+            for i, h in enumerate(H):
+                band_name = 'band{:03d}'.format(b)
+                band = self.db[band_name]
+                bucket_cursor = band.find({'_id': int(h)})
+                for bucket in bucket_cursor:
+                    sim_set = sim_set.union(bucket['vals'])
+        return sim_set
+
+if __name__=="__main__":
+    dbconn = ("localhost", 27017)
+    db_name = "test"
+    client = pm.MongoClient(*dbconn)
+    db = client[db_name]
+
+    Hpp = 100
+    csh = MakeSignature('CosineHash', num_row=3, num_hpp=Hpp)
+    lsh = LSHDB(csh, 5, "mongodb://localhost:27017/", "test")
+    lsh.insert(np.array([.5,.5,.5]))

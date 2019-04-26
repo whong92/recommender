@@ -112,7 +112,7 @@ class RecommenderCFSimple(Recommender):
         test_errors = self.predict(test_idx[0], test_idx[1]) - np.array(Vcsr[test_idx[0], test_idx[1]])
         return test_error, test_errors
 
-    def predict(self, items, users, **kwargs):
+    def predict(self, items, users):
 
         assert len(users) == len(items)
 
