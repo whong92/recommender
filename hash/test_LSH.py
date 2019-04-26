@@ -4,6 +4,32 @@ import numpy as np
 import scipy.sparse as sps
 from scipy.spatial.transform import Rotation as R
 import matplotlib.pyplot as plt
+import os
+
+def generate_random_vectors(M, N):
+    # reference vector
+    ref = np.random.normal(size=(M,))
+    ref /= np.linalg.norm(ref)
+
+    # random other vectors
+    ref2 = np.random.normal(size=(M, N))
+    C = np.cross(ref, ref2, axisb=0)
+    C = np.divide(C, np.expand_dims(np.linalg.norm(C, axis=1), axis=1))
+    C = np.multiply(C, np.random.uniform(0, np.pi, size=(N, 1)))
+    rot = R.from_rotvec(C)
+    X = sps.csc_matrix(rot.apply(ref).transpose())
+
+    return ref, X
+
+def generate_lsh_and_insert(ref, X, M, N, Hpp, B):
+
+    csh = MakeSignature('CosineHash', num_row=3, num_hpp=Hpp)
+    lsh = LSH(csh, num_bands=B)
+    lsh.insert(X)
+
+    sim_set = lsh.find_similar(sps.csc_matrix(np.expand_dims(ref, axis=1), shape=(M, 1)))
+
+    return lsh, csh, sim_set
 
 if __name__=="__main__":
 
@@ -11,33 +37,22 @@ if __name__=="__main__":
     N = 20
     M = 3
     Hpp = 10
-    ref = np.random.normal(size=(M,))
-    ref /= np.linalg.norm(ref)
-
     B = 5
 
-    ref2 = np.random.normal(size=(M,N))
-    C = np.cross(ref, ref2, axisb=0)
-    C = np.divide(C, np.expand_dims(np.linalg.norm(C, axis=1), axis=1))
-    C = np.multiply(C, np.random.uniform(0, np.pi,size=(N,1)))
-    rot = R.from_rotvec(C)
-    X = sps.csc_matrix(rot.apply(ref).transpose())
+    ref, X = generate_random_vectors(M, N)
+    lsh, csh, sim_set = generate_lsh_and_insert(ref, X, M, N, Hpp, B)
 
-    csh = MakeSignature('CosineHash', num_row=3, num_hpp=Hpp)
-    lsh = LSH(csh, num_bands=B)
-    lsh.insert(X)
-
-    sim_set = lsh.find_similar(sps.csc_matrix(np.expand_dims(ref, axis=1), shape=(M,1)))
+    # save initial lsh
     lsh.save('./bla.json')
-
+    # reload lsh and expect to get same sim_set
     lsh2 = LSH(csh, num_bands=B, path='./bla.json')
     sim_set_2 = lsh2.find_similar(sps.csc_matrix(np.expand_dims(ref, axis=1), shape=(M,1)))
     assert len(sim_set - sim_set_2)==0
 
-    import os
     os.remove('./bla.json')
 
-    profile = True
+    # are we profiling?
+    profile = False
 
     def test_cosine_hash():
 
@@ -48,23 +63,11 @@ if __name__=="__main__":
         Hpp = 300
         NumBands = np.array([5, 10, 20, 30, 50, 100])
 
-        ref = np.random.normal(size=(M,))
-        ref /= np.linalg.norm(ref)
+        ref, X = generate_random_vectors(M, N)
 
         for b, B in enumerate(NumBands):
 
-            ref2 = np.random.normal(size=(M,N))
-            C = np.cross(ref, ref2, axisb=0)
-            C = np.divide(C, np.expand_dims(np.linalg.norm(C, axis=1), axis=1))
-            C = np.multiply(C, np.random.uniform(0, np.pi,size=(N,1)))
-            rot = R.from_rotvec(C)
-            X = sps.csc_matrix(rot.apply(ref).transpose())
-
-            csh = MakeSignature('CosineHash', num_row=3, num_hpp=Hpp)
-            lsh = LSH(csh, num_bands=B)
-            lsh.insert(X)
-
-            sim_set = lsh.find_similar(sps.csc_matrix(np.expand_dims(ref, axis=1), shape=(M,1)))
+            lsh, csh, sim_set = generate_lsh_and_insert(ref, X, M, N, Hpp, B)
             Y = np.arccos(ref * X[:, list(sim_set)])
 
             if not profile:

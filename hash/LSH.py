@@ -4,7 +4,6 @@ from collections import defaultdict
 import json
 from zlib import adler32
 import pymongo as pm
-from .Signature import MakeSignature
 from bson.objectid import ObjectId
 
 def MakeLSH(name, *args, **kwargs):
@@ -181,13 +180,8 @@ class LSHDB(LSHInterface):
                     sim_set = sim_set.union(bucket['vals'])
         return sim_set
 
-if __name__=="__main__":
-    dbconn = ("localhost", 27017)
-    db_name = "test"
-    client = pm.MongoClient(*dbconn)
-    db = client[db_name]
+    def save(self, path=None):
 
-    Hpp = 100
-    csh = MakeSignature('CosineHash', num_row=3, num_hpp=Hpp)
-    lsh = LSHDB(csh, 5, "mongodb://localhost:27017/", "test")
-    lsh.insert(np.array([.5,.5,.5]))
+        assert path is not None
+        with open(path, 'w', encoding='utf-8') as fp:
+            json.dump({'num_bands': self.num_bands}, fp)
