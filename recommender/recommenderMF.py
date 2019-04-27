@@ -115,7 +115,7 @@ class RecommenderMF(Recommender):
             {'user': np.zeros(shape=(len(items),), dtype=np.int32),
              'item': items
              })
-        self.lsh.insert(sps.csc_matrix(p['q'].transpose()),Xindex=items)
+        self.lsh.insert(p['q'].transpose(),Xindex=items)
 
     def _save_hash(self, lsh_path):
         with open(os.path.join(lsh_path, 'config.json'), 'w', encoding='utf-8') as fp:
@@ -136,7 +136,7 @@ class RecommenderMF(Recommender):
                         'item': np.array([0], dtype=np.int32)})
 
         bla = self.lsh.find_similar(
-            sps.csc_matrix(np.expand_dims(p['p'][0,:], axis=1))
+            np.expand_dims(p['p'][0,:], axis=1)
         )
         idx = np.array(list(bla), dtype=np.int32)
         p = self.predictor({'user': np.tile(np.array([u_in], dtype=np.int32), len(idx)),

@@ -36,6 +36,7 @@ class LSH(LSHInterface):
         self.num_bands = num_bands
         self.sig = sig
         self.buckets = []
+        self.features = {}
 
         if path is not None:
             with open(path, 'r', encoding='utf-8') as fp:
@@ -71,6 +72,9 @@ class LSH(LSHInterface):
             )
             for i, h in enumerate(H):
                 bucket[h].add(int(Xindex[i]))
+
+        for i in range(X.shape[1]):
+            self.features[int(Xindex[i])] = X[:,i]
 
         return self.buckets
 
@@ -119,9 +123,75 @@ class LSH(LSHInterface):
         return sim_set
 
 
+class LSHDB2(LSH):
+
+    def __init__(self, sig, num_bands=10, dbconn=None, db=None, path=None):
+        super(LSHDB2, self).__init__(sig, num_bands, None)
+        self.dbclient = pm.MongoClient(dbconn)
+        self.db = self.dbclient[db]
+        self.num_bands = num_bands
+        self.sig = sig
+
+    def insert(self, X, Xindex=None, flush_every=1000):
+        n = flush_every
+        if Xindex is None:
+            Xindex = np.arange(0, X.shape[1], dtype=int)
+        for i in range(int(np.ceil(X.shape[1]/n))):
+            Xb = X[:,n*i:n*(i+1)]
+            Xbindex = Xindex[n*i:n*(i+1)]
+            super(LSHDB2, self).insert(Xb, Xbindex)
+            self.flush()
+
+    def flush(self):
+
+        for b, bucket in enumerate(self.buckets):
+            band_name = 'band{:03d}'.format(b)
+            band = self.db[band_name]
+            for h in bucket:
+                bucket_cursor = band.find({'_id': int(h)})
+                bucket_vals = []
+                for dbbucket in bucket_cursor:
+                    bucket_vals = dbbucket['vals']
+                bucket_vals.extend(list(bucket[h]))
+                band.update(
+                    {'_id': int(h)},
+                    {'$set': {'vals': bucket_vals}},
+                    upsert=True,
+                )
+
+        self.buckets = []
+        for i in range(self.num_bands):
+            self.buckets.append(defaultdict(set))
+
+    def find_similar(self, X):
+
+        M = self.sig.generate_signature(X)
+        B = self.num_bands
+        R = int(M.shape[0] / B)
+        sim_set = set()
+        for b in range(self.num_bands):
+            H = np.apply_along_axis(
+                lambda x : np.int64(adler32(x.tobytes()))%NUM_BUCKETS,
+                axis=0,arr=M[b*R:(b+1)*R,:]
+            )
+            for i, h in enumerate(H):
+                band_name = 'band{:03d}'.format(b)
+                band = self.db[band_name]
+                bucket_cursor = band.find({'_id': int(h)})
+                for bucket in bucket_cursor:
+                    sim_set = sim_set.union(bucket['vals'])
+        return sim_set
+
+
+    def save(self, path=None):
+
+        assert path is not None
+        with open(path, 'w', encoding='utf-8') as fp:
+            json.dump({'num_bands': self.num_bands}, fp)
+
 class LSHDB(LSHInterface):
 
-    def __init__(self, sig, num_bands=10, dbconn=None, db=None):
+    def __init__(self, sig, num_bands=10, dbconn=None, db=None, path=None):
         super(LSHDB, self).__init__()
         self.dbclient = pm.MongoClient(dbconn)
         self.db = self.dbclient[db]

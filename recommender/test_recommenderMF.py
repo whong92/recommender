@@ -10,7 +10,9 @@ if __name__=="__main__":
 
     # prediction
     df_mov = pd.read_csv('D:\\PycharmProjects\\recommender\\data\\ml-latest-small\\movies.csv')
-    rmf = RecommenderMF(mode='predict', model_path='./bla/1556115306', lsh_path='./bla')
+    rmf = RecommenderMF(mode='predict',
+                        model_path='D:/PycharmProjects/recommender/models/model/1556408619',
+                        lsh_path='D:/PycharmProjects/recommender/models/model')
 
     thing = df.groupby('item').count()['user']
     thing = thing.loc[thing > 10]

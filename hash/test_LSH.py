@@ -17,7 +17,7 @@ def generate_random_vectors(M, N):
     C = np.divide(C, np.expand_dims(np.linalg.norm(C, axis=1), axis=1))
     C = np.multiply(C, np.random.uniform(0, np.pi, size=(N, 1)))
     rot = R.from_rotvec(C)
-    X = sps.csc_matrix(rot.apply(ref).transpose())
+    X = rot.apply(ref).transpose()
 
     return ref, X
 
@@ -27,7 +27,7 @@ def generate_lsh_and_insert(ref, X, M, N, Hpp, B):
     lsh = LSH(csh, num_bands=B)
     lsh.insert(X)
 
-    sim_set = lsh.find_similar(sps.csc_matrix(np.expand_dims(ref, axis=1), shape=(M, 1)))
+    sim_set = lsh.find_similar(np.expand_dims(ref, axis=1))
 
     return lsh, csh, sim_set
 
@@ -46,7 +46,7 @@ if __name__=="__main__":
     lsh.save('./bla.json')
     # reload lsh and expect to get same sim_set
     lsh2 = LSH(csh, num_bands=B, path='./bla.json')
-    sim_set_2 = lsh2.find_similar(sps.csc_matrix(np.expand_dims(ref, axis=1), shape=(M,1)))
+    sim_set_2 = lsh2.find_similar(np.expand_dims(ref, axis=1))
     assert len(sim_set - sim_set_2)==0
 
     os.remove('./bla.json')
@@ -68,7 +68,7 @@ if __name__=="__main__":
         for b, B in enumerate(NumBands):
 
             lsh, csh, sim_set = generate_lsh_and_insert(ref, X, M, N, Hpp, B)
-            Y = np.arccos(ref * X[:, list(sim_set)])
+            Y = np.arccos(np.matmul(ref, X[:, list(sim_set)]))
 
             if not profile:
                 plt.subplot(len(NumBands),1, b+1)

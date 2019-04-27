@@ -32,7 +32,7 @@ class RecommenderCFReduced(RecommenderCFSimple):
         if not self.use_lsh :
             self.S = (cosine_similarity(Ucsr_red) + 1) / 2  # can be replaced by locality-sensitive hashing
         else:
-            self.lsh.insert(Ucsr_red.transpose())
+            self.lsh.insert(Ucsr_red.todense().transpose())
 
     def _compute_weighted_score(self, u, i=None):
 
@@ -62,7 +62,7 @@ class RecommenderCFReduced(RecommenderCFSimple):
                         T[c] = bxi[c]
                 return T
             else:
-                kidx = list(ss.intersection(self.lsh.find_similar(Ucsc_redT[:,i])))
+                kidx = list(ss.intersection(self.lsh.find_similar(Ucsc_redT[:,i].todense())))
                 if len(kidx) == 0:
                     return bxi[i]
                 return np.mean(np.squeeze(ratings[kidx]) - np.squeeze(bxi[kidx])) + bxi[i]
