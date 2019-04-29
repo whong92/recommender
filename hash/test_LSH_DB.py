@@ -10,7 +10,7 @@ def generate_lshdb_and_insert(url, db_name, ref, X, M, N, Hpp, B):
 
     csh = MakeSignature('CosineHash', num_row=3, num_hpp=Hpp)
     lsh = LSHDB2(csh, B, url, db_name)
-    lsh.insert(X)
+    lsh.insert(X, flush_every=5000)
 
     sim_set = lsh.find_similar(np.expand_dims(ref, axis=1))
 

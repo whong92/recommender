@@ -144,24 +144,30 @@ class LSHDB2(LSH):
 
     def flush(self):
 
+        # buckets
         for b, bucket in enumerate(self.buckets):
             band_name = 'band{:03d}'.format(b)
             band = self.db[band_name]
             for h in bucket:
-                bucket_cursor = band.find({'_id': int(h)})
-                bucket_vals = []
-                for dbbucket in bucket_cursor:
-                    bucket_vals = dbbucket['vals']
-                bucket_vals.extend(list(bucket[h]))
                 band.update(
                     {'_id': int(h)},
-                    {'$set': {'vals': bucket_vals}},
+                    {'$push': {'vals': {'$each': list(bucket[h])}}},
                     upsert=True,
                 )
 
+        # empty buckets
         self.buckets = []
         for i in range(self.num_bands):
             self.buckets.append(defaultdict(set))
+
+        # features
+        for f in self.features:
+            band = self.db["features"]
+            band.update(
+                {'_id': int(f)},
+                {'$set': {'feature': list(self.features[f])}},
+                upsert=True,
+            )
 
     def find_similar(self, X):
 
@@ -179,7 +185,7 @@ class LSHDB2(LSH):
                 band = self.db[band_name]
                 bucket_cursor = band.find({'_id': int(h)})
                 for bucket in bucket_cursor:
-                    sim_set = sim_set.union(bucket['vals'])
+                        sim_set = sim_set.union(bucket['vals'])
         return sim_set
 
 
