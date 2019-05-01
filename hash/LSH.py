@@ -123,14 +123,14 @@ class LSH(LSHInterface):
         return sim_set
 
 
-class LSHDB2(LSH):
+class LSHDB(LSH):
 
-    def __init__(self, sig, num_bands=10, dbconn=None, db=None, path=None):
-        super(LSHDB2, self).__init__(sig, num_bands, None)
-        self.dbclient = pm.MongoClient(dbconn)
-        self.db = self.dbclient[db]
+    def __init__(self, data_service, pref, sig, num_bands=10, path=None):
+        super(LSHDB, self).__init__(sig, num_bands, None)
         self.num_bands = num_bands
         self.sig = sig
+        self.pref = pref
+        self.data = data_service
 
     def insert(self, X, Xindex=None, flush_every=1000):
         n = flush_every
@@ -139,21 +139,14 @@ class LSHDB2(LSH):
         for i in range(int(np.ceil(X.shape[1]/n))):
             Xb = X[:,n*i:n*(i+1)]
             Xbindex = Xindex[n*i:n*(i+1)]
-            super(LSHDB2, self).insert(Xb, Xbindex)
+            super(LSHDB, self).insert(Xb, Xbindex)
             self.flush()
 
     def flush(self):
-
+        # TODO: make this write atomic by using transactions
         # buckets
         for b, bucket in enumerate(self.buckets):
-            band_name = 'band{:03d}'.format(b)
-            band = self.db[band_name]
-            for h in bucket:
-                band.update(
-                    {'_id': int(h)},
-                    {'$push': {'vals': {'$each': list(bucket[h])}}},
-                    upsert=True,
-                )
+            self.data.update_band(self.pref, int(b), bucket)
 
         # empty buckets
         self.buckets = []
@@ -161,13 +154,7 @@ class LSHDB2(LSH):
             self.buckets.append(defaultdict(set))
 
         # features
-        for f in self.features:
-            band = self.db["features"]
-            band.update(
-                {'_id': int(f)},
-                {'$set': {'feature': list(self.features[f])}},
-                upsert=True,
-            )
+        self.data.insert_features(self.pref, self.features)
 
     def find_similar(self, X):
 
@@ -181,89 +168,9 @@ class LSHDB2(LSH):
                 axis=0,arr=M[b*R:(b+1)*R,:]
             )
             for i, h in enumerate(H):
-                band_name = 'band{:03d}'.format(b)
-                band = self.db[band_name]
-                bucket_cursor = band.find({'_id': int(h)})
-                for bucket in bucket_cursor:
-                        sim_set = sim_set.union(bucket['vals'])
+                sim_set = sim_set.union(set(self.data.get_bucket(self.pref, b, h)))
         return sim_set
 
-
-    def save(self, path=None):
-
-        assert path is not None
-        with open(path, 'w', encoding='utf-8') as fp:
-            json.dump({'num_bands': self.num_bands}, fp)
-
-class LSHDB(LSHInterface):
-
-    def __init__(self, sig, num_bands=10, dbconn=None, db=None, path=None):
-        super(LSHDB, self).__init__()
-        self.dbclient = pm.MongoClient(dbconn)
-        self.db = self.dbclient[db]
-        self.num_bands = num_bands
-        self.sig = sig
-
-    def insert(self, X, Xindex=None):
-
-        M = self.sig.generate_signature(X)
-        B = self.num_bands
-        if Xindex is None:
-            Xindex = np.arange(0, M.shape[1], dtype=int)
-        else:
-            assert Xindex.shape[0]==M.shape[1], Xindex.dtype is int
-
-        assert B < M.shape[0] and M.shape[0]%B==0, \
-            "number of buckets must divide number of rows! B = {0}, R = {1}".format(B, M.shape[0])
-        R = int(M.shape[0]/B)
-
-        feature_store = 'features'
-        for i in range(X.shape[1]):
-            feats = self.db[feature_store]
-            feats.update(
-                    {'_id': int(Xindex[i])},
-                    {'$set': {'feature': list(np.squeeze(np.array(X[:,i].todense())))}},
-                    upsert=True,
-                )
-
-        for b in range(self.num_bands):
-            band_name = 'band{:03d}'.format(b)
-            band = self.db[band_name]
-
-            H = np.apply_along_axis(
-                lambda x: np.int64(adler32(x.tobytes())) % NUM_BUCKETS,
-                axis=0, arr=M[b * R:(b + 1) * R, :]
-            )
-
-            for i, h in enumerate(H):
-                bucket_cursor = band.find({'_id': int(h)})
-                bucket_vals = []
-                for bucket in bucket_cursor:
-                    bucket_vals = bucket['vals']
-                bucket_vals.append(int(Xindex[i]))
-                band.update(
-                    {'_id': int(h)},
-                    {'$set': {'vals': bucket_vals}},
-                    upsert=True,
-                )
-
-    def find_similar(self, X):
-        M = self.sig.generate_signature(X)
-        B = self.num_bands
-        R = int(M.shape[0] / B)
-        sim_set = set()
-        for b in range(self.num_bands):
-            H = np.apply_along_axis(
-                lambda x : np.int64(adler32(x.tobytes()))%NUM_BUCKETS,
-                axis=0,arr=M[b*R:(b+1)*R,:]
-            )
-            for i, h in enumerate(H):
-                band_name = 'band{:03d}'.format(b)
-                band = self.db[band_name]
-                bucket_cursor = band.find({'_id': int(h)})
-                for bucket in bucket_cursor:
-                    sim_set = sim_set.union(bucket['vals'])
-        return sim_set
 
     def save(self, path=None):
 
