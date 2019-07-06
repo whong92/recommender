@@ -7,49 +7,51 @@ class MatrixFactorizer(object):
     @staticmethod
     def _model_fn(features, labels, mode, params):
 
-        u_in = tf.cast(features['user'], tf.int32)
-        i_in = tf.cast(features['item'], tf.int32)
+        with tf.device('/cpu:0'):
+            u_in = tf.cast(features['user'], tf.int32)
+            i_in = tf.cast(features['item'], tf.int32)
 
-        N = params['N']
-        M = params['M']
-        f = params['f']
+            N = params['N']
+            M = params['M']
+            f = params['f']
 
-        with tf.variable_scope("MF/model", reuse=tf.AUTO_REUSE):
-            # model
-            P = tf.get_variable("P", [N, f], dtype=tf.float64)
-            Q = tf.get_variable("Q", [M, f], dtype=tf.float64)
-            Bu = tf.get_variable("Bu", [N, ], dtype=tf.float64)
-            Bi = tf.get_variable("Bi", [M, ], dtype=tf.float64)
+            with tf.variable_scope("MF/model", reuse=tf.AUTO_REUSE):
 
-            p = tf.nn.embedding_lookup(P, u_in)
-            q = tf.nn.embedding_lookup(Q, i_in)
-            bu = tf.nn.embedding_lookup(Bu, u_in)
-            bi = tf.nn.embedding_lookup(Bi, i_in)
-            y = tf.reduce_sum(tf.multiply(p, q), axis=1)
-            rhat = y + bu + bi
+                # model
+                P = tf.get_variable("P", [N, f], dtype=tf.float64)
+                Q = tf.get_variable("Q", [M, f], dtype=tf.float64)
+                Bu = tf.get_variable("Bu", [N, ], dtype=tf.float64)
+                Bi = tf.get_variable("Bi", [M, ], dtype=tf.float64)
 
-        if mode == tf.estimator.ModeKeys.PREDICT:
-            predictions = {'rhat': rhat, 'p':p, 'q':q}
-            return tf.estimator.EstimatorSpec(mode, predictions=predictions)
+                p = tf.nn.embedding_lookup(P, u_in)
+                q = tf.nn.embedding_lookup(Q, i_in)
+                bu = tf.nn.embedding_lookup(Bu, u_in)
+                bi = tf.nn.embedding_lookup(Bi, i_in)
+                y = tf.reduce_sum(tf.multiply(p, q), axis=1)
+                rhat = y + bu + bi
 
-        r_in = tf.cast(features['rating'], tf.float64)
+            if mode == tf.estimator.ModeKeys.PREDICT:
+                predictions = {'rhat': rhat, 'p':p, 'q':q}
+                return tf.estimator.EstimatorSpec(mode, predictions=predictions)
 
-        lamb = params['lamb']
-        lr = params['lr']
-        decay = params['decay']
+            r_in = tf.cast(features['rating'], tf.float64)
 
-        mse = tf.losses.mean_squared_error(r_in, rhat)
-        reg = tf.nn.l2_loss(p) + tf.nn.l2_loss(q) + tf.nn.l2_loss(bu) + tf.nn.l2_loss(bi)
-        loss = tf.cast(mse, tf.float64) + tf.reduce_mean(lamb * reg)
+            lamb = params['lamb']
+            lr = params['lr']
+            decay = params['decay']
 
-        if mode == tf.estimator.ModeKeys.EVAL:
-            metrics = {'rmse': tf.metrics.mean_squared_error(r_in, rhat)}
-            return tf.estimator.EstimatorSpec(
-                mode, loss=loss, eval_metric_ops=metrics)
+            mse = tf.losses.mean_squared_error(r_in, rhat)
+            reg = tf.nn.l2_loss(p) + tf.nn.l2_loss(q) + tf.nn.l2_loss(bu) + tf.nn.l2_loss(bi)
+            loss = tf.cast(mse, tf.float64) + tf.reduce_mean(lamb * reg)
 
-        assert mode == tf.estimator.ModeKeys.TRAIN
-        opt = tf.train.RMSPropOptimizer(lr, decay).minimize(loss, global_step=tf.train.get_global_step())
-        return tf.estimator.EstimatorSpec(mode, loss=loss, train_op=opt)
+            if mode == tf.estimator.ModeKeys.EVAL:
+                metrics = {'rmse': tf.metrics.mean_squared_error(r_in, rhat)}
+                return tf.estimator.EstimatorSpec(
+                    mode, loss=loss, eval_metric_ops=metrics)
+
+            assert mode == tf.estimator.ModeKeys.TRAIN
+            opt = tf.train.RMSPropOptimizer(lr, decay).minimize(loss, global_step=tf.train.get_global_step())
+            return tf.estimator.EstimatorSpec(mode, loss=loss, train_op=opt)
 
     @staticmethod
     def _np_input_fn(features, batchsize=32, numepochs=30):
@@ -79,7 +81,7 @@ class MatrixFactorizer(object):
         }
         return tf.estimator.export.ServingInputReceiver(input, input)
 
-    def __init__(self, N, M, f, lr=0.01, lamb=0.01, decay=0.0):
+    def __init__(self, N, M, f=10, lr=0.01, lamb=0.01, decay=0.0):
 
         self.model = tf.estimator.Estimator(
             model_fn=MatrixFactorizer._model_fn,
@@ -113,7 +115,7 @@ class MatrixFactorizer(object):
 
     # TODO: add predict mode
     def save(self, path):
-        self.model.export_saved_model(export_dir_base=path, serving_input_receiver_fn=MatrixFactorizer._predict_input_fn)
+        return self.model.export_saved_model(export_dir_base=path, serving_input_receiver_fn=MatrixFactorizer._predict_input_fn)
 
 
 if __name__=="__main__":

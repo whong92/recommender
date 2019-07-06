@@ -21,7 +21,6 @@ class RecommenderCFSimple(Recommender):
         self.bi = None
         return
 
-    # TODO: use this to replace current input format of a csv filename, give user, item, rating array instead
     @staticmethod
     def to_sparse_matrices(u, i, r, M=None, N=None):
         if M is None:
@@ -39,6 +38,7 @@ class RecommenderCFSimple(Recommender):
 
     def _compute_similarity_matrix(self):
         Ucsr = self.training_data['csr']
+        # TODO: experiment with weighting schemes from here: https://www.benfrederickson.com/distance-metrics/
         self.S = cosine_similarity(Ucsr)
 
     def _compute_weighted_score(self, u, i=None):
@@ -133,7 +133,7 @@ class RecommenderCFSimple(Recommender):
         else:
             p = self.Ud[:, u_in]
 
-        return np.argsort(p), np.sort(p)
+        return np.argsort(p)[::-1], np.sort(p)[::-1]
 
 if __name__=="__main__":
 

@@ -11,8 +11,8 @@ def generate_lshdb_and_insert(url, db_name, ref, X, M, N, Hpp, B):
 
     csh = MakeSignature('CosineHash', num_row=3, num_hpp=Hpp)
     ds = DataService(url, db_name)
-    lsh = LSHDB(ds, 'hullabalooza', csh, B)
-    lsh.insert(X, flush_every=5000)
+    lsh = LSHDB(csh, ds, 'hullabalooza', B)
+    lsh.insert(X, flush_every=1000)
 
     sim_set = lsh.find_similar(np.expand_dims(ref, axis=1))
 
@@ -41,7 +41,7 @@ if __name__=="__main__":
         db = client[db_name]
 
         ds = DataService(url, db_name)
-        lshdb = LSHDB(ds, 'hullabalooza', csh, B)
+        lshdb = LSHDB(csh, ds, 'hullabalooza', B)
         lshdb.insert(X)
         sim_set_db = lshdb.find_similar(np.expand_dims(ref, axis=1))
         assert len(sim_set - sim_set_db) == 0
@@ -49,6 +49,27 @@ if __name__=="__main__":
         # clean up
         client.drop_database(db)
 
+    def test_save_and_load():
+        N = 20
+        M = 3
+        Hpp = 10
+        B = 5
+
+        # X-check results with dict-based LSH
+        ref, X = generate_random_vectors(M, N)
+        lsh, csh, sim_set = generate_lshdb_and_insert(url, db_name, ref, X, M, N, Hpp, B)
+        # save initial lsh
+        lsh.save('./bla.json')
+
+        client = pm.MongoClient(*dbconn)
+        db = client[db_name]
+
+        lshdb = LSHDB(csh, path='./bla.json')
+        sim_set_db = lshdb.find_similar(np.expand_dims(ref, axis=1))
+        assert len(sim_set - sim_set_db) == 0
+
+        # clean up
+        client.drop_database(db)
 
     def test_cosine_hash():
 
@@ -73,6 +94,6 @@ if __name__=="__main__":
 
         plt.show()
 
-    for test in [test_vs_dict_lsh, test_cosine_hash]:
+    for test in [test_vs_dict_lsh, test_save_and_load, test_cosine_hash]:
 
         test()

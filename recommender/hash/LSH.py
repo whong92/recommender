@@ -3,6 +3,9 @@ import numpy as np
 from collections import defaultdict
 import json
 from zlib import adler32
+#import os, sys
+#sys.path.append(os.path.abspath('..'))
+from ..utils.mongodbutils import DataService
 import pymongo as pm
 from bson.objectid import ObjectId
 
@@ -125,12 +128,19 @@ class LSH(LSHInterface):
 
 class LSHDB(LSH):
 
-    def __init__(self, data_service, pref, sig, num_bands=10, path=None):
-        super(LSHDB, self).__init__(sig, num_bands, None)
-        self.num_bands = num_bands
+    def __init__(self, sig, data_service=None, pref=None, num_bands=10, path=None):
         self.sig = sig
-        self.pref = pref
-        self.data = data_service
+        if path is not None:
+            with open(path, 'r', encoding='utf-8') as fp:
+                conf = json.load(fp)
+                self.num_bands = conf['num_bands']
+                self.pref = conf['pref']
+                self.data = DataService(conf['conn'], conf['db_name'])
+        else:
+            self.num_bands = num_bands
+            self.pref = pref
+            self.data = data_service
+        super(LSHDB, self).__init__(self.sig, self.num_bands, None)
 
     def insert(self, X, Xindex=None, flush_every=1000):
         n = flush_every
@@ -155,6 +165,7 @@ class LSHDB(LSH):
 
         # features
         self.data.insert_features(self.pref, self.features)
+        self.features = {}
 
     def find_similar(self, X):
 
@@ -176,4 +187,11 @@ class LSHDB(LSH):
 
         assert path is not None
         with open(path, 'w', encoding='utf-8') as fp:
-            json.dump({'num_bands': self.num_bands}, fp)
+            json.dump(
+                {'num_bands': self.num_bands,
+                 'pref': self.pref,
+                 'conn': self.data.conn,
+                 'db_name': self.data.db_name,
+                 }
+                , fp
+            )
