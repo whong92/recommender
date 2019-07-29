@@ -5,13 +5,14 @@ import tensorflow as tf
 from tqdm import tqdm
 
 
-def csv2df(file, item, user, rating, return_cat_mapping=False, **kwargs):
+def csv2df(file, item, user, rating):
     df = pd.read_csv(file, usecols=[item, user, rating])
     df.rename(columns={
         item: 'item',
         user: 'user',
         rating: 'rating',
     }, inplace=True)
+    return df
 
 
 def normalizeDf(rating_df):
@@ -23,6 +24,10 @@ def normalizeDf(rating_df):
 
     user_map = df[['user_cat', 'user']].drop_duplicates()
     item_map = df[['item_cat', 'item']].drop_duplicates()
+    item_map.set_index('item', inplace=True)
+    user_map.set_index('user', inplace=True)
+    df.drop(['user', 'item'], inplace=True, axis=1)
+    df.rename({'item_cat':'item', 'user_cat':'user'}, inplace=True, axis=1)
 
     return df, user_map, item_map
 
@@ -47,7 +52,6 @@ def getCatMap(chunks):
             axis=1
         )
         tot_len += len(chunk)
-
     return user_map, item_map, tot_len
 
 def getChunk(file, item, user, rating, chunksize=1000):
@@ -126,13 +130,3 @@ def splitDf(df, train_test_split=0.8):
     test_df = df.iloc[perm[int(len(df) * train_test_split):]]
     return train_df, test_df
 
-def makeTfDataset(input, batchsize, numepochs):
-    ds = tf.data.Dataset.from_tensor_slices(input)
-    ds = ds.batch(batchsize)
-    ds = ds.repeat(numepochs)
-    iterator = ds.make_initializable_iterator()
-    next = iterator.get_next()
-    return iterator, next
-
-def csv2TfRecords(in_filename, out_filename):
-    df, N, M = csv2df(in_filename, out_filename)
