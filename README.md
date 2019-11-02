@@ -3,7 +3,7 @@ Various implementations of recommender systems. Currently implemented are:
 
 ## Simple Collaborative Filtering
 - [x] cosine distance model
-- [ ] TF-IDF + cosine model
+- [x] TF-IDF + cosine model
 - [ ] BM25 + cosine model
 
 ## Matrix Factorization Collaborative Filtering

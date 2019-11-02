@@ -74,7 +74,7 @@ class RecommenderMF(Recommender):
 
     def predict(self, u_in, i_in):
         assert self.mode is 'predict'
-        return self.predictor({'user': u_in, 'item': i_in})
+        return self.predictor({'user': u_in, 'item': i_in})['rhat']
 
     def recommend(self, u_in):
         # manual prediction by enumerating all stuff
