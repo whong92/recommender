@@ -1,6 +1,6 @@
 from ..utils.utils import csv2df, splitDf
 from ..utils.ItemMetadata import ExplicitDataFromCSV
-from .recommenderMF import RecommenderMF, RecommenderMFBias
+from .recommenderALS import RecommenderALS
 import tensorflow as tf
 import numpy as np
 import pandas as pd
@@ -9,7 +9,7 @@ import os
 
 if __name__=="__main__":
 
-    data_folder = 'D:\\PycharmProjects\\recommender\\data\\ml-20m'
+    data_folder = 'D:\\PycharmProjects\\recommender\\data\\ml-latest-small'
     model_folder = 'D:\\PycharmProjects\\recommender\\recommender\\models'
 
     # TODO: separate the making of the dataset and using it in a separate script
@@ -43,22 +43,29 @@ if __name__=="__main__":
     # training
     train_test_split = 0.8
     ds_train, ds_test, D_train, D_test = d.make_training_datasets(train_test_split)
-    D_train.to_csv(os.path.join(data_folder, 'ratings_train.csv'))
-    D_test.to_csv(os.path.join(data_folder, 'ratings_test.csv'))
+    # D_train.to_csv(os.path.join(data_folder, 'ratings_train.csv'))
+    # D_test.to_csv(os.path.join(data_folder, 'ratings_test.csv'))
 
-    save_path = os.path.join(model_folder, "MF_".format(datetime.now().strftime("%m%Y%d%H%M%S")))
+    save_path = os.path.join(model_folder, "ALS_{:s}".format(datetime.now().strftime("%m%Y%d%H%M%S")))
     if not os.path.exists(save_path):
         os.mkdir(save_path)
 
     # TODO: test with RecommenderMFBias
-    rmf = RecommenderMF(mode='train', n_users=d.N, n_items=d.M,
-                        mf_kwargs={'f':20,'lamb':1e-06},
+    rals = RecommenderALS(mode='train', n_users=d.N, n_items=d.M,
+                        als_kwargs={'K':10, 'lamb':1e-06, 'alpha':40.},
                         model_path=save_path
                         )
     tf.logging.set_verbosity(tf.logging.INFO)
 
     # array input format - onnly for smaller datasets
-    rmf.input_data(ds_train, ds_test)
-    rmf.train(numepochs=10, batchsize=5000)
+    rals.input_array_data(
+        np.array(D_train['user'], dtype=np.int32),
+        np.array(D_train['item'], dtype=np.int32),
+        np.array(D_train['rating'], dtype=np.float64),
+        np.array(D_test['user'], dtype=np.int32),
+        np.array(D_test['item'], dtype=np.int32),
+        np.array(D_test['rating'], dtype=np.float64),
+    )
+    rals.train()
 
-    rmf.save(save_path)
+    rals.save(save_path)

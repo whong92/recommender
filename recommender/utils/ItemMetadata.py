@@ -32,13 +32,17 @@ class ExplicitDataFromCSV(ExplicitData):
             ExplicitDataFromCSV.sanitize_ratings(ratings_csv, r_item_col, r_user_col, r_rating_col)
         self.md_df = ExplicitDataFromCSV.makeMetadataDf(self.item_map.copy(), metadata_csv, m_item_col)
         self.stats = ExplicitDataFromCSV.calc_rating_stats(self.ratings)
+        self.df_train = None
+        self.df_test = None
 
-    def from_saved_csv(self, ratings_csv, user_map_csv, item_map_csv, md_csv, stats_csv):
+    def from_saved_csv(self, ratings_csv, user_map_csv, item_map_csv, md_csv, stats_csv, ratings_train_csv=None, ratings_test_csv=None):
         self.ratings = pd.read_csv(ratings_csv)
         self.user_map = pd.read_csv(user_map_csv, index_col='user_cat')
         self.item_map = pd.read_csv(item_map_csv, index_col='item_cat')
         self.md_df = pd.read_csv(md_csv, index_col='item_cat')
         self.stats = pd.read_csv(stats_csv, index_col='item')
+        self.df_train = pd.read_csv(ratings_train_csv, index_col=None)
+        self.df_test = pd.read_csv(ratings_test_csv, index_col=None)
 
     def __init__(self, from_saved=False, **kwargs):
         super(ExplicitDataFromCSV, self).__init__()
@@ -86,9 +90,15 @@ class ExplicitDataFromCSV(ExplicitData):
         self.item_map.to_csv(os.path.join(dir, 'item_map.csv'))
         self.md_df.to_csv(os.path.join(dir, 'metadata.csv'))
         self.stats.to_csv(os.path.join(dir, 'stats.csv'))
+        if self.df_train is not None and self.df_test is not None:
+            self.df_train.to_csv(os.path.join(dir, 'ratings_train.csv'))
+            self.df_test.to_csv(os.path.join(dir, 'ratings_test.csv'))
 
     def make_training_datasets(self, train_test_split=0.8):
-        D_train, D_test = splitDf(self.ratings, train_test_split)
+        if self.df_train is None or self.df_test is None:
+            D_train, D_test = splitDf(self.ratings, train_test_split)
+        else:
+            D_train, D_test = self.df_train, self.df_test
         feat_train = {'user': D_train['user'], 'item': D_train['item'], 'rating': D_train['rating']}
         feat_test = {'user': D_test['user'], 'item': D_test['item'], 'rating': D_test['rating']}
         ds_train_input_fn = lambda: tf.data.Dataset.from_tensor_slices(feat_train)

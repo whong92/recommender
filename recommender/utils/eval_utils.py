@@ -11,6 +11,9 @@ def compute_auc(model, user, test, train):
     n = len(rec_filt)
     p = len(pos)
 
+    if p == 0: # no positive examples to test against
+        return -1
+
     f = n - p
     tp = 0
     fp = 0
@@ -34,6 +37,10 @@ def compute_ap(model, user, test, train):
     rec_filt = filter_train_rec(rec, df_test_excl)
 
     p = len(pos)
+
+    if p == 0: # no positive examples to test against
+        return -1
+
     tp = 0
     ap = 0
 
