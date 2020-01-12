@@ -1,7 +1,7 @@
 from recommender.utils.eval_utils import compute_auc, compute_ap
-from recommender.recommender.recommenderMF import RecommenderMF
+# from recommender.recommender.recommenderMF import RecommenderMF
 from recommender.recommender.recommenderALS import RecommenderALS
-from recommender.recommender.recommenderCFSimple import RecommenderCFSimple
+#from recommender.recommender.recommenderCFSimple import RecommenderCFSimple
 import os
 import numpy as np
 from tqdm import tqdm
@@ -30,7 +30,7 @@ if __name__=="__main__":
                             )
 
     # model_path = os.path.join(model_folder, 'model/07201914185949/')
-    model_path = os.path.join(model_folder, 'ALS_11201924164044')
+    model_path = os.path.join(model_folder, 'ALS_01202018225751')
     # model_path = os.path.join(model_folder, 'CF_2019_11_02')
     # rmf = RecommenderMF(mode='predict', model_path=model_path)
     # rmf = RecommenderCFSimple(mode='predict', model_file=model_path)
@@ -38,7 +38,7 @@ if __name__=="__main__":
 
     # explicit score prediction
     F = rmf.predict(np.array(d.df_test['user']), np.array(d.df_test['item']))
-    print("bla: {:f}".format(np.sqrt(np.mean(np.power(F - d.df_test['rating'], 2)))))
+    print("bla: {:f}".format(np.sqrt(np.mean(np.power(F['rhat'] - d.df_test['rating'], 2)))))
 
     # implicit score prediction
     M = len(d.user_map)

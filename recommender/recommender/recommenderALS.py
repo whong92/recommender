@@ -1,5 +1,7 @@
 from .recommenderInterface import Recommender
 from .ALS import ALS
+from .ALS2 import ALSTF
+import scipy.sparse as sps
 import os
 import json
 from recommender.recommender.recommenderCFSimple import RecommenderCFSimple
@@ -27,7 +29,8 @@ class RecommenderALS(Recommender):
         if mode is 'train':
             if als_kwargs is None:
                 als_kwargs = {'K':10, 'lamb':1e-06, 'alpha':40.}
-            self.als = ALS(model_path=model_path, N=n_users, M=n_items, **als_kwargs)
+            self.als = ALSTF(batchsize=100, mode=mode, model_path=model_path, N=n_users, M=n_items, **als_kwargs)
+            # self.als = ALS(model_path=model_path, N=n_users, M=n_items, **als_kwargs)
 
         if mode is 'predict':
 
@@ -40,15 +43,18 @@ class RecommenderALS(Recommender):
 
             self.data = None
             self.input_format = None
-            self.als = ALS(mode='predict', model_path=model_path, N=n_users, M=n_items)
+            if als_kwargs is None:
+                als_kwargs = {}
+            self.als = ALSTF(batchsize=300, mode=mode, model_path=model_path, N=n_users, M=n_items, **als_kwargs)
+            # self.als = ALS(mode='predict', model_path=model_path, N=n_users, M=n_items)
 
     def input_array_data(self, u_train, i_train, r_train, u_test, i_test, r_test):
         self.training_data = RecommenderCFSimple.to_sparse_matrices(u_train, i_train, r_train, self.als.M, self.als.N)
         self.validation_data = RecommenderCFSimple.to_sparse_matrices(u_test, i_test, r_test, self.als.M, self.als.N)
 
-    def train(self):
+    def train(self, steps=10):
         assert self.mode is 'train', "must be in train mode!"
-        self.als.train(self.training_data['csr'].T)
+        return self.als.train(sps.csr_matrix(self.training_data['csr'].T), steps=steps)
 
     def save(self, path):
         self.als.save(path)
@@ -60,7 +66,7 @@ class RecommenderALS(Recommender):
 
     def predict(self, u_in, i_in):
         assert self.mode is 'predict'
-        return np.sum(np.multiply(self.als.X[u_in], self.als.Y[i_in]), axis=1)
+        return {'rhat': np.sum(np.multiply(self.als.X[u_in], self.als.Y[i_in]), axis=1), 'q': self.als.Y[i_in]}
 
     def recommend(self, u_in):
         # manual prediction by enumerating all stuff

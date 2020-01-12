@@ -91,8 +91,8 @@ class ExplicitDataFromCSV(ExplicitData):
         self.md_df.to_csv(os.path.join(dir, 'metadata.csv'))
         self.stats.to_csv(os.path.join(dir, 'stats.csv'))
         if self.df_train is not None and self.df_test is not None:
-            self.df_train.to_csv(os.path.join(dir, 'ratings_train.csv'))
-            self.df_test.to_csv(os.path.join(dir, 'ratings_test.csv'))
+            self.df_train.to_csv(os.path.join(dir, 'ratings_train.csv'), index=False)
+            self.df_test.to_csv(os.path.join(dir, 'ratings_test.csv'), index=False)
 
     def make_training_datasets(self, train_test_split=0.8):
         if self.df_train is None or self.df_test is None:
