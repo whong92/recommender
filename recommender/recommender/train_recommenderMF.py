@@ -1,6 +1,6 @@
 from ..utils.utils import csv2df, splitDf
 from ..utils.ItemMetadata import ExplicitDataFromCSV
-from .recommenderMF import RecommenderMF, RecommenderMFBias
+from .recommenderMF import RecommenderMF
 import tensorflow as tf
 import numpy as np
 import pandas as pd
@@ -10,7 +10,7 @@ import os
 if __name__=="__main__":
 
     data_folder = 'D:\\PycharmProjects\\recommender\\data\\ml-20m'
-    model_folder = 'D:\\PycharmProjects\\recommender\\recommender\\models'
+    model_folder = 'D:\\PycharmProjects\\recommender\\models'
 
     # TODO: separate the making of the dataset and using it in a separate script
     """
@@ -46,13 +46,16 @@ if __name__=="__main__":
     # D_train.to_csv(os.path.join(data_folder, 'ratings_train.csv'))
     # D_test.to_csv(os.path.join(data_folder, 'ratings_test.csv'))
 
-    save_path = os.path.join(model_folder, "MF_{}".format(datetime.now().strftime("%m%Y%d%H%M%S")))
+    save_path = os.path.join(model_folder, "MF_{:s}".format(datetime.now().strftime("%Y-%m-%d.%H-%M-%S")))
     if not os.path.exists(save_path):
         os.mkdir(save_path)
 
     # TODO: test with RecommenderMFBias
     rmf = RecommenderMF(mode='train', n_users=d.N, n_items=d.M,
-                        mf_kwargs={'f':20,'lamb':1e-07, 'decay':0.9, 'lr':0.005},
+                        mf_kwargs={
+                            'f':20,'lamb':1e-07, 'decay':0.9, 'lr':0.005,
+                            'epochs': 50, 'batchsize': 5000,
+                        },
                         model_path=save_path
                         )
     # tf.logging.set_verbosity(tf.logging.INFO)
@@ -67,6 +70,6 @@ if __name__=="__main__":
         np.array(D_test['item'], dtype=np.int32),
         np.array(D_test['rating'], dtype=np.float64),
     )
-    rmf.train(numepochs=10, batchsize=5000)
+    rmf.train()
 
     rmf.save(save_path)

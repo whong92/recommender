@@ -1,14 +1,9 @@
 from .recommenderInterface import Recommender
 from .MatrixFactor import MatrixFactorizer
 from sklearn.metrics.pairwise import cosine_similarity
-# from tensorflow import predictor
 import numpy as np
-import scipy.sparse as sps
 import json
-import tensorflow as tf
 import os
-import shutil
-import glob
 
 class RecommenderMF(Recommender):
 
@@ -26,12 +21,13 @@ class RecommenderMF(Recommender):
         self.predictor = None
         # only for training
         self.config = {
-            'n_users': n_users, 'n_items': n_items
+            'n_users': n_users, 'n_items': n_items,
+            'mf_kwargs': mf_kwargs
         }
 
         if mode is 'train':
             if mf_kwargs is None:
-                mf_kwargs = {'f': 20, 'lamb': .001, 'lr': .01, 'decay': 0.0}
+                mf_kwargs = {'f': 20, 'lamb': .001, 'lr': .01, 'decay': 0.0, 'epochs': 30, 'batchsize': 5000}
             self.estimator = self._get_model()(model_path, n_users, n_items, **mf_kwargs)
 
         if mode is 'predict':
@@ -45,7 +41,7 @@ class RecommenderMF(Recommender):
 
             #self.predictor = tf.saved_model.load(model_path)
             self.predictor = self._get_model()(
-                os.path.join(model_path, 'model.h5')
+                os.path.join(model_path, 'model_best.h5')
                 ,n_users, n_items, mode=mode
             )
             self.data = None
@@ -66,13 +62,11 @@ class RecommenderMF(Recommender):
         self.i_test = i_test
         self.r_test = r_test
 
-    def train(self, numepochs=30, batchsize=5000):
+    def train(self):
         assert self.mode is 'train', "must be in train mode!"
-        # self.estimator.fit(self.data_train, self.data_test, numepochs=numepochs, batchsize=batchsize)
         self.estimator.fit(
             self.u_train, self.i_train, self.r_train,
-            self.u_test, self.i_test, self.r_test,
-            numepochs=numepochs, batchsize=batchsize
+            self.u_test, self.i_test, self.r_test
         )
 
     def save(self, path):
@@ -81,7 +75,7 @@ class RecommenderMF(Recommender):
 
     def _save_config(self, lsh_path):
         with open(os.path.join(lsh_path, 'config.json'), 'w', encoding='utf-8') as fp:
-            json.dump(self.config, fp)
+            json.dump(self.config, fp, indent=4)
 
     def predict(self, u_in, i_in):
         assert self.mode is 'predict'

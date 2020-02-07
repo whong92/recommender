@@ -23,10 +23,9 @@ import os
 
 if __name__=="__main__":
 
-    data_folder = 'D:\\PycharmProjects\\recommender\\data\\ml-latest-small'
+    data_folder = 'D:\\PycharmProjects\\recommender\\data\\ml-20m'
     model_folder = 'D:\\PycharmProjects\\recommender\\models'
 
-    # TODO: separate the making of the dataset and using it in a separate script
     ratings_csv = os.path.join(data_folder, 'ratings_sanitized.csv')
     user_map_csv = os.path.join(data_folder, 'user_map.csv')
     item_map_csv = os.path.join(data_folder, 'item_map.csv')
@@ -49,7 +48,7 @@ if __name__=="__main__":
     train_test_split = 0.8
     _, _, D_train, D_test = d.make_training_datasets(train_test_split)
 
-    save_path = os.path.join(model_folder, "ALS_{:s}".format(datetime.now().strftime("%m%Y%d%H%M%S")))
+    save_path = os.path.join(model_folder, "ALS_{:s}".format(datetime.now().strftime("%Y-%m-%d.%H-%M-%S")))
     if not os.path.exists(save_path):
         os.mkdir(save_path)
 
@@ -69,7 +68,7 @@ if __name__=="__main__":
         np.array(D_test['rating'], dtype=np.float64),
     )
 
-    trace = rals.train()
+    trace = rals.train(steps=30)
     plt.plot(trace)
     plt.show()
 

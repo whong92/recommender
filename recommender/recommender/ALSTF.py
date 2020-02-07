@@ -6,6 +6,7 @@ import os
 import tensorflow as tf
 from .ALS import ALS
 from keras.utils import generic_utils
+import pandas as pd
 
 def get_and_pad_ratings(R, users, M, batchsize=None):
     ru = R[users, :]
@@ -116,22 +117,31 @@ class ALSTF(ALS):
 
             trace[i] = .5*(dX + dY)
 
+            self.X = X.numpy()
+            self.Y = Y.numpy()
+            self.save(os.path.join(self.model_path, 'epoch-{:03d}'.format(i)))
+
         self.X = X.numpy()
         self.Y = Y.numpy()
+
+        pd.DataFrame({
+            'epoch': list(range(steps)), 'trace': trace,
+        }).to_csv(os.path.join(self.model_path, 'trace.csv'), index=False)
 
         return trace
 
     def save(self, model_path=None):
 
-        if model_path is not None:
-            self.model_path = model_path
-        assert self.model_path is not None, "model path not specified"
-
-        np.save(os.path.join(self.model_path, "X.npy"), self.X[:-1])
-        np.save(os.path.join(self.model_path, "Y.npy"), self.Y[:-1])
+        if model_path is None:
+            model_path = self.model_path
+        assert model_path is not None, "model path not specified"
+        if not os.path.exists(model_path):
+            os.mkdir(model_path)
+        np.save(os.path.join(model_path, "X.npy"), self.X[:-1])
+        np.save(os.path.join(model_path, "Y.npy"), self.Y[:-1])
 
 ####### Pure tf.function implementation with tf.datasets #######
-# empirically tested to be slower with ml-20m in sparse matrices
+# empirically tested to be slower with ml-20m with in-memory sparse matrices
 
 @tf.function
 def run_single_step(
@@ -259,6 +269,14 @@ class ALSTF_DS(ALSTF):
 
             trace[i] += .5*(dX + dY)
             progbar.add(1, [("embedding deltas", trace[i])])
+
+            self.X = X.numpy()
+            self.Y = Y.numpy()
+            self.save(os.path.join(self.model_path, 'epoch-{:03d}'.format(i)))
+
+        pd.DataFrame({
+            'epoch': list(range(steps)), 'trace': trace,
+        }).to_csv(os.path.join(self.model_path, 'trace.csv'), index=False)
 
         return trace
 

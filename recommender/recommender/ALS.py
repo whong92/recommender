@@ -33,6 +33,7 @@ class ALS:
             self.alpha = alpha
         else:
             assert model_path is not None, "model path required in predict mode"
+            model_path = os.path.join(model_path, 'epoch-best')
             self.X = np.load(os.path.join(model_path, 'X.npy'))
             self.Y = np.load(os.path.join(model_path, 'Y.npy'))
 
@@ -114,16 +115,20 @@ class ALS:
             Yp = self._run_single_step(self.X, self.Y, C.T, R.T, p.T)
             trace[i] += np.mean(np.abs(self.Y - Yp))
             self.Y = Yp
+
+            self.save(os.path.join(self.model_path, 'epoch-{:03d}'.format(i)))
+
         return trace
 
     def save(self, model_path=None):
 
-        if model_path is not None:
-            self.model_path = model_path
-        assert self.model_path is not None, "model path not specified"
-
-        np.save(os.path.join(self.model_path, "X.npy"), self.X)
-        np.save(os.path.join(self.model_path, "Y.npy"), self.Y)
+        if model_path is None:
+            model_path = self.model_path
+        assert model_path is not None, "model path not specified"
+        if not os.path.exists(model_path):
+            os.mkdir(model_path)
+        np.save(os.path.join(model_path, "X.npy"), self.X)
+        np.save(os.path.join(model_path, "Y.npy"), self.Y)
 
 if __name__=="__main__":
 
@@ -149,30 +154,3 @@ if __name__=="__main__":
     C.data = 1 + 1. * C.data
     als = ALS(N=N, M=M, K=K)
     als._run_single_step(Yinit, Xinit, C, R, p)
-
-    # p = R.copy().astype(np.bool).astype(np.float, copy=True)
-    # C = R.copy()
-    # C.data = 1 + als.alpha * C.data
-    #
-    # Xp = als._run_single_step_naive(als.Y, als.X, R, p)
-    # print(Xp[1,:])
-    #
-    # steps = 20
-    # losses = np.zeros(shape=(steps*2))
-    # for s in range(steps):
-    #     Xp = als._run_single_step(als.Y, als.X, C, R, p)
-    #     als.X = Xp
-    #     losses[2*s] = als._calc_loss(als.Y, als.X, C, R, p)
-    #     print(losses[2*s])
-    #     Yp = als._run_single_step(als.X, als.Y, C.T, R.T, p.T)
-    #     als.Y = Yp
-    #     losses[2*s+1] = als._calc_loss(als.Y, als.X, C, R, p)
-    #     print(losses[2*s+1])
-    #
-    # model_path = "D:\\PycharmProjects\\recommender\\models\\ALS_toy_2019_11_18"
-    # if not os.path.exists(model_path):
-    #     os.mkdir(model_path)
-    # als.save(model_path)
-    #
-    # plt.plot(np.log(losses), 'o:')
-    # plt.show()

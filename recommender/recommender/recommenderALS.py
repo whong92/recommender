@@ -23,7 +23,8 @@ class RecommenderALS(Recommender):
         self.als = None
         # only for training
         self.config = {
-            'n_users': n_users, 'n_items': n_items
+            'n_users': n_users, 'n_items': n_items,
+            'als_kwargs': als_kwargs,
         }
 
         if mode is 'train':
@@ -62,7 +63,7 @@ class RecommenderALS(Recommender):
 
     def _save_config(self, lsh_path):
         with open(os.path.join(lsh_path, 'config.json'), 'w', encoding='utf-8') as fp:
-            json.dump(self.config, fp)
+            json.dump(self.config, fp, indent=4)
 
     def predict(self, u_in, i_in):
         assert self.mode is 'predict'
