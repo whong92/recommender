@@ -23,7 +23,7 @@ import os
 
 if __name__=="__main__":
 
-    data_folder = 'D:\\PycharmProjects\\recommender\\data\\ml-20m'
+    data_folder = 'D:\\PycharmProjects\\recommender\\data\\ml-latest-small'
     model_folder = 'D:\\PycharmProjects\\recommender\\models'
 
     # TODO: separate the making of the dataset and using it in a separate script
@@ -53,7 +53,6 @@ if __name__=="__main__":
     if not os.path.exists(save_path):
         os.mkdir(save_path)
 
-    # TODO: test with RecommenderMFBias
     rals = RecommenderALS(mode='train', n_users=d.N, n_items=d.M,
                         als_kwargs={'K':10, 'lamb':1e-06, 'alpha':40.},
                         model_path=save_path

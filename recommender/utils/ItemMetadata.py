@@ -36,13 +36,13 @@ class ExplicitDataFromCSV(ExplicitData):
         self.df_test = None
 
     def from_saved_csv(self, ratings_csv, user_map_csv, item_map_csv, md_csv, stats_csv, ratings_train_csv=None, ratings_test_csv=None):
-        self.ratings = pd.read_csv(ratings_csv)
+        self.ratings = pd.read_csv(ratings_csv, index_col=None)[['rating', 'item', 'user']]
         self.user_map = pd.read_csv(user_map_csv, index_col='user_cat')
         self.item_map = pd.read_csv(item_map_csv, index_col='item_cat')
         self.md_df = pd.read_csv(md_csv, index_col='item_cat')
         self.stats = pd.read_csv(stats_csv, index_col='item')
-        self.df_train = pd.read_csv(ratings_train_csv, index_col=None)
-        self.df_test = pd.read_csv(ratings_test_csv, index_col=None)
+        self.df_train = pd.read_csv(ratings_train_csv, index_col=None)[['rating', 'item', 'user']]
+        self.df_test = pd.read_csv(ratings_test_csv, index_col=None)[['rating', 'item', 'user']]
 
     def __init__(self, from_saved=False, **kwargs):
         super(ExplicitDataFromCSV, self).__init__()
@@ -85,7 +85,7 @@ class ExplicitDataFromCSV(ExplicitData):
         return item_map
 
     def save(self, dir):
-        self.ratings.to_csv(os.path.join(dir, 'ratings_sanitized.csv'))
+        self.ratings.to_csv(os.path.join(dir, 'ratings_sanitized.csv'), index=False)
         self.user_map.to_csv(os.path.join(dir, 'user_map.csv'))
         self.item_map.to_csv(os.path.join(dir, 'item_map.csv'))
         self.md_df.to_csv(os.path.join(dir, 'metadata.csv'))

@@ -5,6 +5,19 @@ from tqdm import tqdm
 import os
 import tensorflow as tf
 from .ALS import ALS
+from keras.utils import generic_utils
+
+def get_and_pad_ratings(R, users, M, batchsize=None):
+    ru = R[users, :]
+    l = np.max(ru.getnnz(axis=1))
+    if batchsize is None:
+        batchsize = len(users)
+    rp = np.zeros(shape=(batchsize, l), dtype=np.float)
+    yp = M*np.ones(shape=(batchsize, l), dtype=np.int)
+    for u, user in enumerate(users):
+        rp[u, :ru[u].data.shape[0]] = ru[u].data
+        yp[u, :ru[u].indices.shape[0]] = ru[u].indices
+    return rp, yp
 
 @tf.function(experimental_relax_shapes=True)
 def als_run_regression(
@@ -34,7 +47,7 @@ class ALSTF(ALS):
             self.X = np.append(self.X, np.zeros(shape=(1,self.K)), axis=0)
             self.Y = np.append(self.Y, np.zeros(shape=(1,self.K)), axis=0)
 
-    def _run_single_step(self, Y: tf.Tensor, X: tf.Tensor, R: sps.csr_matrix):
+    def _run_single_step(self, Y: tf.Tensor, X: tf.Tensor, R: sps.csr_matrix, prefix=""):
 
         batchsize = self.batchsize
         N = X.shape[0]-1
@@ -49,6 +62,9 @@ class ALSTF(ALS):
         Lamb = tf.multiply(tf.constant(lamb, dtype=tf.float64),
                            tf.linalg.eye(num_rows=k, batch_shape=[batchsize], dtype=tf.float64))
         diff = tf.Variable(dtype=tf.float64, initial_value=0.)
+        batch_diff = tf.Variable(dtype=tf.float64, initial_value=0.)
+
+        progbar = generic_utils.Progbar(np.ceil(float(N)/batchsize))
 
         for i in range(0, N, batchsize):
 
@@ -64,11 +80,14 @@ class ALSTF(ALS):
             )
 
             if N < i + batchsize:
-                diff.assign_add(tf.reduce_sum(tf.abs(X[i:N]-Xnew[:N - i])))
+                batch_diff.assign(tf.reduce_sum(tf.abs(X[i:N]-Xnew[:N - i])))
                 X[i:N].assign(Xnew[:N - i])
             else:
-                diff.assign_add(tf.reduce_sum(tf.abs(X[i:i + batchsize]-Xnew)))
+                batch_diff.assign(tf.reduce_sum(tf.abs(X[i:i + batchsize]-Xnew)))
                 X[i:i + batchsize].assign(Xnew)
+
+            diff.assign_add(batch_diff)
+            progbar.add(1, values=[(prefix + ' embedding delta', batch_diff/min(i + batchsize, N))])
 
         return diff / tf.cast(N, dtype=tf.float64)
 
@@ -90,12 +109,12 @@ class ALSTF(ALS):
 
         trace = np.zeros(shape=(steps,))
 
-        for i in tqdm(range(steps)):
+        for i in range(steps):
+            print("step {}/{}".format(i, steps-1))
+            dX = self._run_single_step(Y, X, U, prefix="X")
+            dY = self._run_single_step(X, Y, UT, prefix="Y")
 
-            dX = self._run_single_step(Y, X, U)
-            dY = self._run_single_step(X, Y, UT)
-
-            trace[i] = dX + dY
+            trace[i] = .5*(dX + dY)
 
         self.X = X.numpy()
         self.Y = Y.numpy()
@@ -111,6 +130,8 @@ class ALSTF(ALS):
         np.save(os.path.join(self.model_path, "X.npy"), self.X[:-1])
         np.save(os.path.join(self.model_path, "Y.npy"), self.Y[:-1])
 
+####### Pure tf.function implementation with tf.datasets #######
+# empirically tested to be slower with ml-20m in sparse matrices
 
 @tf.function
 def run_single_step(
@@ -161,19 +182,6 @@ def run_single_step(
             X[i:i + batchsize_c].assign(Xnew)
 
     return diff / tf.cast(N_c, dtype=tf.float64)
-
-
-def get_and_pad_ratings(R, users, M, batchsize=None):
-    ru = R[users, :]
-    l = np.max(ru.getnnz(axis=1))
-    if batchsize is None:
-        batchsize = len(users)
-    rp = np.zeros(shape=(batchsize, l), dtype=np.float)
-    yp = M*np.ones(shape=(batchsize, l), dtype=np.int)
-    for u, user in enumerate(users):
-        rp[u, :ru[u].data.shape[0]] = ru[u].data
-        yp[u, :ru[u].indices.shape[0]] = ru[u].indices
-    return rp, yp
 
 
 def sparse2dataset(indices: np.array, data: np.array, N: int, M: int, batch_size: int):
@@ -236,7 +244,9 @@ class ALSTF_DS(ALSTF):
 
         trace = np.zeros(shape=(steps,))
 
-        for i in tqdm(range(steps)):
+        progbar = generic_utils.Progbar(np.ceil(float(N) / batchsize))
+
+        for i in range(steps):
             diff.assign(0.)
 
             rs, ys = sparse2dataset(indices, data, N, M, batchsize)
@@ -247,7 +257,8 @@ class ALSTF_DS(ALSTF):
             ds = tf.data.Dataset.zip((rs, ys))
             dY = run_single_step(batchsize, M, N, K, alpha, lamb, X, Y, diff, ds)
 
-            trace[i] += dX + dY
+            trace[i] += .5*(dX + dY)
+            progbar.add(1, [("embedding deltas", trace[i])])
 
         return trace
 

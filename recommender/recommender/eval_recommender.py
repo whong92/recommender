@@ -1,5 +1,5 @@
 from recommender.utils.eval_utils import compute_auc, compute_ap
-# from recommender.recommender.recommenderMF import RecommenderMF
+from recommender.recommender.recommenderMF import RecommenderMF
 from recommender.recommender.recommenderALS import RecommenderALS
 #from recommender.recommender.recommenderCFSimple import RecommenderCFSimple
 import os
@@ -10,7 +10,7 @@ from recommender.utils.ItemMetadata import ExplicitDataFromCSV
 if __name__=="__main__":
 
     data_folder = 'D:\\PycharmProjects\\recommender\\data\\ml-latest-small'
-    model_folder = 'D:\\PycharmProjects\\recommender\\models'
+    model_folder = 'D:\\PycharmProjects\\recommender\\recommender\\models'
 
     ratings_csv = os.path.join(data_folder, 'ratings_sanitized.csv')
     user_map_csv = os.path.join(data_folder, 'user_map.csv')
@@ -29,15 +29,16 @@ if __name__=="__main__":
                             ratings_test_csv=df_test
                             )
 
-    # model_path = os.path.join(model_folder, 'model/07201914185949/')
-    model_path = os.path.join(model_folder, 'ALS_01202018225751')
+    model_path = os.path.join(model_folder, 'MF_02202003215526')
+    # model_path = os.path.join(model_folder, 'ALS_01202018225751')
     # model_path = os.path.join(model_folder, 'CF_2019_11_02')
-    # rmf = RecommenderMF(mode='predict', model_path=model_path)
+    rmf = RecommenderMF(mode='predict', model_path=model_path)
     # rmf = RecommenderCFSimple(mode='predict', model_file=model_path)
-    rmf = RecommenderALS(mode='predict', model_path=model_path)
+    # rmf = RecommenderALS(mode='predict', model_path=model_path)
 
     # explicit score prediction
     F = rmf.predict(np.array(d.df_test['user']), np.array(d.df_test['item']))
+    print(F['rhat'].shape)
     print("bla: {:f}".format(np.sqrt(np.mean(np.power(F['rhat'] - d.df_test['rating'], 2)))))
 
     # implicit score prediction

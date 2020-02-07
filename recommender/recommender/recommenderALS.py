@@ -1,6 +1,6 @@
 from .recommenderInterface import Recommender
 from .ALS import ALS
-from .ALS2 import ALSTF
+from .ALSTF import ALSTF
 import scipy.sparse as sps
 import os
 import json
