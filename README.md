@@ -10,6 +10,7 @@ Various implementations of recommender systems. Currently implemented are:
 - [x] Explicit (SVD-like factorization)
 - [x] Explicit (Factorization plus bias)
 - [x] Implicit (Alternating Least-Squares: http://yifanhu.net/PUB/cf.pdf)
+- [x] Implicit (Logistic Matrix Factorization)
 - [ ] Implicit (Bayesian Personalized Ranking)
 
 ## Example
