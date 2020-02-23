@@ -1,12 +1,15 @@
-from .recommenderInterface import Recommender
-from .ALS import ALS
-from .ALSTF import ALSTF
-import scipy.sparse as sps
-import os
 import json
-from recommender.recommender.recommenderCFSimple import RecommenderCFSimple
+import os
+
 import numpy as np
+import scipy.sparse as sps
 from sklearn.metrics.pairwise import cosine_similarity
+
+from recommender.core.ALS import ALSTF
+from recommender.utils.ItemMetadata import ExplicitDataFromCSV
+from .recommenderInterface import Recommender
+from ..utils.eval_utils import AUCCallback
+
 
 class RecommenderALS(Recommender):
 
@@ -21,6 +24,7 @@ class RecommenderALS(Recommender):
 
         self.mode = mode
         self.als = None
+        self.data = None
         # only for training
         self.config = {
             'n_users': n_users, 'n_items': n_items,
@@ -44,18 +48,26 @@ class RecommenderALS(Recommender):
 
             self.data = None
             self.input_format = None
-            if als_kwargs is None:
-                als_kwargs = {}
-            self.als = ALSTF(batchsize=300, mode=mode, model_path=model_path, N=n_users, M=n_items, **als_kwargs)
+            self.als = ALSTF(
+                batchsize=300, mode=mode, model_path=os.path.join(model_path, 'epoch-best'),
+                N=self.config['n_users'], M=self.config['n_items'], **self.config['als_kwargs'])
             # self.als = ALS(mode='predict', model_path=model_path, N=n_users, M=n_items)
 
-    def input_array_data(self, u_train, i_train, r_train, u_test, i_test, r_test):
-        self.training_data = RecommenderCFSimple.to_sparse_matrices(u_train, i_train, r_train, self.als.M, self.als.N)
-        self.validation_data = RecommenderCFSimple.to_sparse_matrices(u_test, i_test, r_test, self.als.M, self.als.N)
+    def input_data(self, data: ExplicitDataFromCSV):
+        self.data = data
+        self.training_data, self.validation_data = data.make_training_datasets(dtype='sparse')
+        return
 
     def train(self, steps=10):
         assert self.mode is 'train', "must be in train mode!"
-        return self.als.train(sps.csr_matrix(self.training_data['csr'].T), steps=steps)
+        AUCC = AUCCallback(
+            self.data, np.arange(0,self.data.N,self.data.N//300,dtype=int),
+            save_fn=lambda: self.als.save_as_epoch('best')
+        )
+        AUCC.set_model(self)
+        trace = self.als.train(sps.csr_matrix(self.training_data.T), steps=steps, cb=AUCC)
+        AUCC.save_result(os.path.join(self.model_file, 'AUC.csv'))
+        return trace
 
     def save(self, path):
         self.als.save(path)
@@ -73,9 +85,9 @@ class RecommenderALS(Recommender):
         # manual prediction by enumerating all stuff
         X = self.als.X[u_in]
         Y = self.als.Y
-        p = np.sum(np.multiply(X, Y), axis=1)
+        p = np.matmul(X, np.transpose(Y))  # np.sum(np.multiply(X, Y), axis=1)
 
-        return np.argsort(p)[::-1], np.sort(p)[::-1]
+        return np.argsort(p)[:, ::-1], np.sort(p)[:, ::-1]
 
     def similar_to(self, i_in):
         y = self.als.Y[i_in]

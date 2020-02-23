@@ -49,9 +49,11 @@ class RecommenderCFSimple(Recommender):
             'csc': sps.csc_matrix((r, (i, u)), shape=(M,N))
         }
 
-    def input_array_data(self, u_train, i_train, r_train, u_test, i_test, r_test):
-        self.training_data = RecommenderCFSimple.to_sparse_matrices(u_train, i_train, r_train, self.M, self.N)
-        self.validation_data = RecommenderCFSimple.to_sparse_matrices(u_test, i_test, r_test, self.M, self.N)
+    def input_data(self, data: ExplicitDataFromCSV):
+        data_train, data_test = data.make_training_datasets(dtype='dense')
+        self.training_data = RecommenderCFSimple.to_sparse_matrices(*data_train, self.M, self.N)
+        self.validation_data = RecommenderCFSimple.to_sparse_matrices(*data_test, self.M, self.N)
+
 
     def _compute_similarity_matrix(self):
         Ucsr = self.training_data['csr']

@@ -2,12 +2,12 @@
 I started this project looking to implement a simple recommender system
 to help me choose films for movie nights (which I still do use it for).
 It has since turned into a passion project to learn more about the 
-various super-interesting ML techniques powering modern recommenders. 
+the many innovative and insightful ML techniques powering modern recommenders. 
 This repository records and documents my learning experiences, from simple
 cosine-distance nearest-neighbor methods, to sophisticated Bayesian Matrix
 Factorization techniques.
 
-## Simple Nearest-Neighbor Collaborative Filtering\
+## Simple Nearest-Neighbor Collaborative Filtering
 These models use item-item NN methods, based on a vector of user ratings (explicit/implicit).
 They are simple to implement and interpret, and work well with little data. They are however, 
 rather inefficient (O(UI)) to compute, scaling poorly in terms of performance. These techniques
@@ -23,7 +23,8 @@ These methods try to approximately factorize the user-item matrix, into a set of
 (for both user and items). Explicit methods work with explicitly rated items by users (think star
 ratings on IMDB), and treat missing data as missing at random. Implicit methods, on the other hand,
 can involve non-explicit user-item interations (e.g. number of listens of an album on spotify), and
-treat missing entries as information (can indicate non-preference or non-knowledge).
+treat missing entries as information (can indicate non-preference or non-knowledge). The loss
+function to optimize to predict the resulting matrix can be designed to reflect these assumptions.
 
 Shown below is a list of stuff I have worked on, mostly implemented in keras/tf
 

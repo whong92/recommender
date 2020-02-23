@@ -3,6 +3,8 @@ import pandas as pd
 import os
 from .utils import csv2df, normalizeDf, splitDf
 import tensorflow as tf
+import numpy as np
+import scipy.sparse as sps
 
 class ExplicitData(ABC):
     def __init__(self):
@@ -44,13 +46,34 @@ class ExplicitDataFromCSV(ExplicitData):
         self.df_train = pd.read_csv(ratings_train_csv, index_col=None)[['rating', 'item', 'user']]
         self.df_test = pd.read_csv(ratings_test_csv, index_col=None)[['rating', 'item', 'user']]
 
+    def from_standard_dataset(self, data_folder):
+        self.from_saved_csv(
+            ratings_csv=os.path.join(data_folder, 'ratings_sanitized.csv'),
+            user_map_csv = os.path.join(data_folder, 'user_map.csv'),
+            item_map_csv = os.path.join(data_folder, 'item_map.csv'),
+            md_csv = os.path.join(data_folder, 'metadata.csv'),
+            stats_csv = os.path.join(data_folder, 'stats.csv'),
+            ratings_train_csv = os.path.join(data_folder, 'ratings_train.csv'),
+            ratings_test_csv = os.path.join(data_folder, 'ratings_test.csv'),
+        )
+
     def __init__(self, from_saved=False, **kwargs):
+        """
+        The user/item columns in all stored tables  in this class are in terms of the
+        sanitized user/items (0-M/0-N) respectively. self.item_map and self.user_map
+        provides the mapping back to its original keys
+        :param from_saved: if we are loading from saved (processed) data, in which case a
+        folder with the required csvs is expected
+        :param kwargs: arguments that are required by ExplicitDataFromCSV.from_raw_csv
+        """
         super(ExplicitDataFromCSV, self).__init__()
         if from_saved:
-            self.from_saved_csv(**kwargs)
+            self.from_standard_dataset(**kwargs)
         else:
             self.from_raw_csv(**kwargs)
         self.N, self.M = len(self.user_map), len(self.item_map)
+        self.df_train_by_user = None
+        self.df_test_by_user = None
         return
 
     def fetch_md(self, item_ids):
@@ -94,17 +117,38 @@ class ExplicitDataFromCSV(ExplicitData):
             self.df_train.to_csv(os.path.join(dir, 'ratings_train.csv'), index=False)
             self.df_test.to_csv(os.path.join(dir, 'ratings_test.csv'), index=False)
 
-    def make_training_datasets(self, train_test_split=0.8):
+    def make_training_datasets(
+            self, train_test_split=0.8,
+            dtype:str='dense', ctype:np.dtype=np.int32, rtype:np.dtype=np.float64):
         if self.df_train is None or self.df_test is None:
             D_train, D_test = splitDf(self.ratings, train_test_split)
         else:
             D_train, D_test = self.df_train, self.df_test
-        feat_train = {'user': D_train['user'], 'item': D_train['item'], 'rating': D_train['rating']}
-        feat_test = {'user': D_test['user'], 'item': D_test['item'], 'rating': D_test['rating']}
-        ds_train_input_fn = lambda: tf.data.Dataset.from_tensor_slices(feat_train)
-        ds_test_input_fn = lambda: tf.data.Dataset.from_tensor_slices(feat_test)
-        return ds_train_input_fn, ds_test_input_fn, D_train, D_test
+        assert dtype in {'dense', 'sparse'}, "dtype not understood"
+        if dtype == 'dense':
+            return self.make_positive_arrays(D_train, ctype, rtype), \
+                   self.make_positive_arrays(D_test, ctype, rtype)
+        elif dtype == 'sparse':
+            return self.make_sparse_matrices(D_train, ctype, rtype), \
+                   self.make_sparse_matrices(D_test, ctype, rtype)
 
+    def make_positive_arrays(self, D:pd.DataFrame, ctype:np.dtype=np.int32, rtype:np.dtype=np.float64):
+        return (
+            np.array(D['user'], dtype=ctype),
+            np.array(D['item'], dtype=ctype),
+            np.array(D['rating'], dtype=rtype)
+        )
+
+    def make_sparse_matrices(self, D:pd.DataFrame, ctype:np.dtype=np.int32, rtype:np.dtype=np.float64):
+        rows, cols, data = self.make_positive_arrays(D, ctype, rtype)
+        return sps.csr_matrix((data, (cols, rows)), shape=(self.M, self.N))
+
+    def get_user_ratings(self, user):
+        if self.df_test_by_user is None:
+            self.df_test_by_user = self.df_test.set_index('user', drop=False)
+        if self.df_train_by_user is None:
+            self.df_train_by_user = self.df_train.set_index('user', drop=False)
+        return self.df_train_by_user.loc[[user]], self.df_test_by_user.loc[[user]]
 
 if __name__=="__main__":
     """

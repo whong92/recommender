@@ -1,12 +1,144 @@
 import numpy as np
+import pandas as pd
 import scipy.sparse as sps
 import matplotlib.pyplot as plt
+import tensorflow as tf
+from keras.utils import generic_utils
+from scipy import sparse as sps
 from tqdm import tqdm
 import os
-import tensorflow as tf
-from .ALS import ALS
-from keras.utils import generic_utils
-import pandas as pd
+from keras.callbacks import Callback
+from typing import Union
+
+
+class ALS:
+
+    def __init__(
+            self, mode='train', N=100, M=100, K=10, lamb=1e-06, alpha=40., model_path=None,
+            Xinit=None, Yinit=None
+    ):
+        self.R = None #U # utility |user|x|items|, sparse, row major
+        self.mode = mode
+        self.model_path = model_path
+        self.M = M
+        self.N = N
+        if mode == 'train':
+            self.K = K
+            # dense feature matrices
+            if Xinit is not None:
+                self.X = Xinit.copy()
+            else:
+                np.random.seed(42)
+                self.X = np.random.normal(0, 1 / np.sqrt(self.K), size=(N, self.K))
+            if Yinit is not None:
+                self.Y = Yinit.copy()
+            else:
+                np.random.seed(42)
+                self.Y = np.random.normal(0, 1/np.sqrt(self.K), size=(M, self.K))
+            self.lamb = lamb
+            self.alpha = alpha
+        else:
+            assert model_path is not None, "model path required in predict mode"
+            self.X = np.load(os.path.join(model_path, 'X.npy'))
+            self.Y = np.load(os.path.join(model_path, 'Y.npy'))
+
+    def _run_single_step(self, Y, X, C, R, p_float):
+
+        assert self.mode == 'train', "cannot call when mode is not train"
+
+        lamb = self.lamb
+        Y2 = np.tensordot(Y.T, Y, axes=1)
+        Lamb = lamb*np.eye(self.K)
+        alpha = self.alpha
+        Xp = X.copy()
+
+        for u, x in enumerate(X):
+            cu = C[u, :]
+            ru = R[u, :]
+            p_idx = sps.find(ru)[1]
+            Yp = Y[p_idx, :]
+            rp = ru[:, p_idx].toarray()[0]
+            L = np.linalg.inv(Y2 + np.matmul(Yp.T, alpha*np.multiply(np.expand_dims(rp, axis=1), Yp)) + Lamb)
+            cup = cu[:, p_idx].toarray()[0]
+            p = p_float[u, :]
+            pp = p[:, p_idx].toarray()[0]
+            xp = np.matmul(L, np.tensordot(Yp.T, np.multiply(cup, pp), axes=1))
+            Xp[u, :] = xp
+        return Xp
+
+    def _run_single_step_naive(self, Y, X, _R, p_float):
+
+        assert self.mode == 'train', "cannot call when mode is not train"
+
+        lamb = self.lamb
+        Lamb = lamb * np.eye(self.K)
+        alpha = self.alpha
+
+        C = _R.copy().toarray()
+        C = 1 + alpha*C
+        P = p_float.copy().toarray()
+
+        Xp = X.copy()
+
+        for u, x in enumerate(X):
+            cu = C[u, :]
+            Cu = np.diag(cu)
+            pu = P[u,:]
+            L = np.linalg.inv(np.matmul(Y.T, np.matmul(Cu, Y)) + Lamb)
+            xp = np.matmul(L, np.matmul(Y.T,np.matmul(Cu, pu)))
+            Xp[u, :] = xp
+
+        return Xp
+
+    def _calc_loss(self, Y, X, _C, _R, _p):
+
+        assert self.mode == 'train', "cannot call when mode is not train"
+
+        lamb = self.lamb
+        p = _p.copy().toarray()
+        R = _R.copy().toarray()
+        C = _C.copy().toarray()
+        loss = np.sum(np.multiply(C, np.square(p - np.matmul(X, Y.T))))
+        loss += lamb*(np.mean(np.linalg.norm(X, 2, axis=1)) + np.mean(np.linalg.norm(Y, 2, axis=1)))
+        return loss
+
+    def train(self, U, steps=10, cb:Callback=None):
+
+        assert self.mode == 'train', "cannot call when mode is not train"
+        R = U
+        p = R.astype(np.bool, copy=True).astype(np.float, copy=True)
+        C = R.copy()
+        C.data = 1 + self.alpha*C.data
+
+        trace = np.zeros(shape=(steps,))
+
+        for i in tqdm(range(steps)):
+
+            Xp = self._run_single_step(self.Y, self.X, C, R, p)
+            trace[i] = np.mean(np.abs(self.X - Xp))
+            self.X = Xp
+            Yp = self._run_single_step(self.X, self.Y, C.T, R.T, p.T)
+            trace[i] += np.mean(np.abs(self.Y - Yp))
+            self.Y = Yp
+
+            self.save_as_epoch(i)
+
+        return trace
+
+    def save(self, model_path=None):
+
+        if model_path is None:
+            model_path = self.model_path
+        assert model_path is not None, "model path not specified"
+        if not os.path.exists(model_path):
+            os.mkdir(model_path)
+        np.save(os.path.join(model_path, "X.npy"), self.X)
+        np.save(os.path.join(model_path, "Y.npy"), self.Y)
+
+    def save_as_epoch(self, epoch:Union[str, int]='best'):
+        model_name = 'epoch-{:03d}' if type(epoch)==int else 'epoch-{:s}'
+        self.save(os.path.join(self.model_path, model_name.format(epoch)))
+
 
 def get_and_pad_ratings(R, users, M, batchsize=None):
     ru = R[users, :]
@@ -19,6 +151,7 @@ def get_and_pad_ratings(R, users, M, batchsize=None):
         rp[u, :ru[u].data.shape[0]] = ru[u].data
         yp[u, :ru[u].indices.shape[0]] = ru[u].indices
     return rp, yp
+
 
 @tf.function(experimental_relax_shapes=True)
 def als_run_regression(
@@ -92,7 +225,7 @@ class ALSTF(ALS):
 
         return diff / tf.cast(N, dtype=tf.float64)
 
-    def train(self, U, steps=10):
+    def train(self, U, steps=10, cb:Callback=None):
 
         assert self.mode == 'train', "cannot call when mode is not train"
 
@@ -107,7 +240,6 @@ class ALSTF(ALS):
         X[N].assign(tf.zeros([k], dtype=tf.float64))
 
         UT = sps.csr_matrix(U.T)
-
         trace = np.zeros(shape=(steps,))
 
         for i in range(steps):
@@ -119,7 +251,9 @@ class ALSTF(ALS):
 
             self.X = X.numpy()
             self.Y = Y.numpy()
-            self.save(os.path.join(self.model_path, 'epoch-{:03d}'.format(i)))
+            self.save_as_epoch(i)
+            if cb:
+                cb.on_epoch_end(i)
 
         self.X = X.numpy()
         self.Y = Y.numpy()
@@ -140,8 +274,10 @@ class ALSTF(ALS):
         np.save(os.path.join(model_path, "X.npy"), self.X[:-1])
         np.save(os.path.join(model_path, "Y.npy"), self.Y[:-1])
 
-####### Pure tf.function implementation with tf.datasets #######
-# empirically tested to be slower with ml-20m with in-memory sparse matrices
+    def save_as_epoch(self, epoch:Union[str, int]='best'):
+        model_name = 'epoch-{:03d}' if type(epoch)==int else 'epoch-{:s}'
+        self.save(os.path.join(self.model_path, model_name.format(epoch)))
+
 
 @tf.function
 def run_single_step(
@@ -194,6 +330,9 @@ def run_single_step(
     return diff / tf.cast(N_c, dtype=tf.float64)
 
 
+####### Pure tf.function implementation with tf.datasets #######
+# empirically tested to be slower with ml-20m with in-memory sparse matrices
+
 def sparse2dataset(indices: np.array, data: np.array, N: int, M: int, batch_size: int):
 
     ds = tf.data.Dataset.from_tensor_slices(
@@ -229,7 +368,7 @@ class ALSTF_DS(ALSTF):
     def __init__(self, *args, **kwargs):
         super(ALSTF_DS, self).__init__(*args, **kwargs)
 
-    def train(self, U, steps=10):
+    def train(self, U, steps=10, cb:Callback=None):
 
         rows, cols, data = sps.find(U)
         indices = np.zeros(shape=(len(c), 2), dtype=np.int64)
@@ -274,6 +413,9 @@ class ALSTF_DS(ALSTF):
             self.Y = Y.numpy()
             self.save(os.path.join(self.model_path, 'epoch-{:03d}'.format(i)))
 
+            if cb:
+                cb.on_epoch_end(i)
+
         pd.DataFrame({
             'epoch': list(range(steps)), 'trace': trace,
         }).to_csv(os.path.join(self.model_path, 'trace.csv'), index=False)
@@ -281,83 +423,28 @@ class ALSTF_DS(ALSTF):
         return trace
 
 
+
 if __name__=="__main__":
 
-    #########################
-    # setup
-    M = 800
-    N = 350
-    P = 1500
-    alpha = 40.
-    lamb = 1e-06
+    M = 100
+    N = 50
+    P = 150
     np.random.seed(42)
     data = np.random.randint(1, 10, size=(P,))
-    c = np.random.randint(0, M * N, size=(P,))
-    c = np.unique(c)
-    data = data[:len(c)]
-    rows = c // M
-    cols = c % M
+    c = np.random.randint(0, M*N, size=(P,))
+    rows = c//M
+    cols = c%M
 
-    U = sps.csr_matrix((data, (rows, cols)), shape=(N,M), dtype=np.float64)
+    U = sps.csr_matrix((data, (rows, cols)), shape=(N,M))
     R = U
-
-    indices = np.zeros(shape=(len(c),2), dtype=np.int64)
-    indices[:,0] = rows
-    indices[:,1] = cols
-
-    rs, ys = sparse2dataset(indices, data, N, M, 3)
 
     K = 5
 
     Xinit = np.random.normal(0, 1 / np.sqrt(K), size=(N, K))
     Yinit = np.random.normal(0, 1 / np.sqrt(K), size=(M, K))
 
-    #########################
-    # reference non-tf implementation
     p = R.copy().astype(np.bool).astype(np.float, copy=True)
     C = R.copy()
-    C.data = 1 + alpha * C.data
-
-    als = ALS(N=N, M=M, K=K, alpha=alpha, lamb=lamb, Xinit=Xinit, Yinit=Yinit)
-
-    Xnew = als._run_single_step(Yinit, Xinit, C, R, p)
-    print(Xnew[:3])
-    Ynew = als._run_single_step(Xinit, Yinit, C.T, R.T, p.T)
-    print(Ynew[:3])
-
-    trace = als.train(R, steps=10)
-    plt.plot(trace)
-    plt.show()
-
-    #########################
-    # test TF implementation
-    batchsize=3
-    Yinit_a = np.append(Yinit, np.zeros(shape=(1,K)), axis=0)
-    Xinit_a = np.append(Xinit, np.zeros(shape=(1, K)), axis=0)
-
-    alstf = ALSTF(batchsize=300, N=N, M=M, K=K, alpha=alpha, lamb=lamb, Xinit=Xinit, Yinit=Yinit)
-
-    X = tf.Variable(name="X", dtype=tf.float64, initial_value=Xinit_a)
-    Y = tf.Variable(name="Y", dtype=tf.float64, initial_value=Yinit_a)
-
-    alstf._run_single_step(Y, X, R)
-    print(X[:3])
-    print(Y[:3])
-
-    trace = alstf.train(U)
-    plt.plot(trace)
-    plt.show()
-
-    #########################
-    # test tf implementaion with datasets
-    Y = tf.Variable(initial_value=Yinit)
-    X = tf.Variable(initial_value=Xinit)
-    Y2 = tf.reshape(tf.tensordot(tf.transpose(Y), Y, axes=1, name='Y2'), shape=[1, K, K])
-    Lamb = tf.multiply(tf.constant(lamb, dtype=tf.float64),
-                       tf.linalg.eye(num_rows=K, batch_shape=[batchsize], dtype=tf.float64))
-    ds = tf.data.Dataset.zip((rs, ys))
-    diff = tf.Variable(dtype=tf.float64, initial_value=0.)
-    trace = run_single_step(batchsize, N, M, K, alpha, lamb, Y, X, diff, ds)
-
-    print(X[:3])
-    print(Y[:3])
+    C.data = 1 + 1. * C.data
+    als = ALS(N=N, M=M, K=K)
+    als._run_single_step(Yinit, Xinit, C, R, p)

@@ -1,4 +1,7 @@
 data/*
+models/*
+!data/READme.md
+!models/READme.md
 *.idea
 *__pycache__*
 *.pyc

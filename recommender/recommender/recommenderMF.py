@@ -1,9 +1,13 @@
-from .recommenderInterface import Recommender
-from .MatrixFactor import MatrixFactorizer
-from sklearn.metrics.pairwise import cosine_similarity
-import numpy as np
 import json
 import os
+
+import numpy as np
+from sklearn.metrics.pairwise import cosine_similarity
+
+from recommender.core.MatrixFactor import MatrixFactorizer
+from recommender.utils.ItemMetadata import ExplicitDataFromCSV
+from .recommenderInterface import Recommender
+
 
 class RecommenderMF(Recommender):
 
@@ -42,7 +46,7 @@ class RecommenderMF(Recommender):
             #self.predictor = tf.saved_model.load(model_path)
             self.predictor = self._get_model()(
                 os.path.join(model_path, 'model_best.h5')
-                ,n_users, n_items, mode=mode
+                ,self.config['n_users'], self.config['n_items'], mode=mode
             )
             self.data = None
             self.input_format = None
@@ -50,23 +54,14 @@ class RecommenderMF(Recommender):
     def _get_model(self):
         return MatrixFactorizer
 
-    def input_data(self, ds_train, ds_test):
-        self.data_train = ds_train
-        self.data_test = ds_test
-
-    def input_array_data(self, u_train, i_train, r_train, u_test, i_test, r_test):
-        self.u_train = u_train
-        self.i_train = i_train
-        self.r_train = r_train
-        self.u_test = u_test
-        self.i_test = i_test
-        self.r_test = r_test
+    def input_data(self, data: ExplicitDataFromCSV):
+        self.data_train, self.data_test = data.make_training_datasets(dtype='dense')
 
     def train(self):
         assert self.mode is 'train', "must be in train mode!"
         self.estimator.fit(
-            self.u_train, self.i_train, self.r_train,
-            self.u_test, self.i_test, self.r_test
+            *self.data_train,
+            *self.data_test,
         )
 
     def save(self, path):
