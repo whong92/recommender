@@ -7,7 +7,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 from recommender.core.MatrixFactor import MatrixFactorizer
 from recommender.utils.ItemMetadata import ExplicitDataFromCSV
 from .recommenderInterface import Recommender
-
+from typing import Optional, Iterable
 
 class RecommenderMF(Recommender):
 
@@ -85,6 +85,12 @@ class RecommenderMF(Recommender):
             i_in=np.arange(0, self.config['n_items'], dtype=np.int32))
 
         return np.argsort(p['rhat'])[::-1], np.sort(p['rhat'])[::-1]
+
+    def train_update(self, users: Optional[Iterable[int]]=None):
+        raise NotImplementedError
+
+    def add_users(self, num=1):
+        raise NotImplementedError
 
     def similar_to(self, i_in):
         p = self.predict(

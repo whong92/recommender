@@ -36,7 +36,7 @@ if __name__=="__main__":
 
     rlmf = RecommenderLMF(
         mode='train', n_users=d.N, n_items=d.M,
-        lmf_kwargs={'f':10, 'lamb':1e-06, 'alpha':5., 'lr': 0.1, 'bias': False, 'epochs':100},
+        lmf_kwargs={'f':10, 'lamb':1e-06, 'alpha':5., 'lr': 0.1, 'bias': False, 'epochs':50},
         model_path=save_path
     )
     # tf.logging.set_verbosity(tf.logging.INFO)

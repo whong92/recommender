@@ -9,7 +9,7 @@ from recommender.core.ALS import ALSTF
 from recommender.utils.ItemMetadata import ExplicitDataFromCSV
 from .recommenderInterface import Recommender
 from ..utils.eval_utils import AUCCallback
-
+from typing import Iterable, Optional
 
 class RecommenderALS(Recommender):
 
@@ -58,16 +58,28 @@ class RecommenderALS(Recommender):
         self.training_data, self.validation_data = data.make_training_datasets(dtype='sparse')
         return
 
-    def train(self, steps=10):
+    def add_users(self, num=1):
+        self.als._add_users(num=num)
+
+    def train(self):
         assert self.mode is 'train', "must be in train mode!"
         AUCC = AUCCallback(
             self.data, np.arange(0,self.data.N,self.data.N//300,dtype=int),
             save_fn=lambda: self.als.save_as_epoch('best')
         )
         AUCC.set_model(self)
-        trace = self.als.train(sps.csr_matrix(self.training_data.T), steps=steps, cb=AUCC)
+        trace = self.als.train(sps.csr_matrix(self.training_data.T), cb=AUCC)
         AUCC.save_result(os.path.join(self.model_file, 'AUC.csv'))
-        return trace
+        return trace, AUCC.AUCe
+
+    def train_update(self, users: Optional[Iterable[int]]=None):
+        if users is None:
+            users = np.arange(self.data.N)
+        AUCC = AUCCallback(self.data, users, save_fn=lambda: self.als.save_as_epoch('best_updated'))
+        AUCC.set_model(self)
+        trace = self.als.train_update(sps.csr_matrix(self.training_data.T), users, cb=AUCC, use_cache=True)
+        AUCC.save_result(os.path.join(self.model_file, 'AUC_update.csv'))
+        return trace, AUCC.AUCe
 
     def save(self, path):
         self.als.save(path)
@@ -95,3 +107,13 @@ class RecommenderALS(Recommender):
         s = np.squeeze(cosine_similarity(Y, np.expand_dims(y, axis=0)))
 
         return np.argsort(s)[::-1][1:], np.sort(s)[::-1][1:]
+
+    def recommend_similar_to(self, u_in, i_in):
+        X = self.als.X[u_in]
+        y = self.als.Y[i_in]
+        Y = self.als.Y
+        s = np.squeeze(cosine_similarity(Y, np.expand_dims(y, axis=0)))
+        p = np.matmul(X, np.transpose(Y))  # np.sum(np.multiply(X, Y), axis=1)
+        q = .5*(p + s)
+
+        return np.argsort(q)[::-1], np.sort(q)[::-1]

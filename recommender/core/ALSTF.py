@@ -50,7 +50,7 @@ if __name__=="__main__":
     Ynew = als._run_single_step(Xinit, Yinit, C.T, R.T, p.T)
     print(Ynew[:3])
 
-    trace = als.train(R, steps=10)
+    trace = als.train(R)
     plt.plot(trace)
     plt.show()
 

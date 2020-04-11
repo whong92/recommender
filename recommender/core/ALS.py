@@ -8,13 +8,13 @@ from scipy import sparse as sps
 from tqdm import tqdm
 import os
 from keras.callbacks import Callback
-from typing import Union
+from typing import Union, Optional
 
 
 class ALS:
 
     def __init__(
-            self, mode='train', N=100, M=100, K=10, lamb=1e-06, alpha=40., model_path=None,
+            self, mode='train', N=100, M=100, K=10, lamb=1e-06, alpha=40., steps=10, model_path=None,
             Xinit=None, Yinit=None
     ):
         self.R = None #U # utility |user|x|items|, sparse, row major
@@ -22,6 +22,7 @@ class ALS:
         self.model_path = model_path
         self.M = M
         self.N = N
+        self.steps = steps
         if mode == 'train':
             self.K = K
             # dense feature matrices
@@ -102,8 +103,8 @@ class ALS:
         loss += lamb*(np.mean(np.linalg.norm(X, 2, axis=1)) + np.mean(np.linalg.norm(Y, 2, axis=1)))
         return loss
 
-    def train(self, U, steps=10, cb:Callback=None):
-
+    def train(self, U, cb:Callback=None):
+        steps = self.steps
         assert self.mode == 'train', "cannot call when mode is not train"
         R = U
         p = R.astype(np.bool, copy=True).astype(np.float, copy=True)
@@ -177,11 +178,48 @@ class ALSTF(ALS):
     def __init__(self, batchsize, *args, **kwargs):
         self.batchsize = batchsize
         super(ALSTF, self).__init__(*args, **kwargs)
-        if self.mode == 'train':
-            self.X = np.append(self.X, np.zeros(shape=(1,self.K)), axis=0)
-            self.Y = np.append(self.Y, np.zeros(shape=(1,self.K)), axis=0)
 
-    def _run_single_step(self, Y: tf.Tensor, X: tf.Tensor, R: sps.csr_matrix, prefix=""):
+        # variables for online training
+        self.Y2Tensor = None
+        self.LambTensor = None
+        self.YTensor = None
+        self.XTensor = None
+
+    def _add_users(self, num=1):
+        self.X = np.append(self.X, np.zeros(shape=(num,self.K)), axis=0)
+        if self.XTensor is not None: # update cached tensor if exists
+            self.XTensor = tf.Variable(
+                name="X", dtype=tf.float64,
+                initial_value=np.append(self.X, np.zeros(shape=(1, self.K)), axis=0)
+            )
+        self.N += num
+
+    def train_update(self, U, users, cb:Callback=None, use_cache=False):
+
+        if cb: cb.on_epoch_end(0) # eval before
+
+        users = np.unique(users)  # remove duplicates
+        assert np.max(users) < self.N, "new user exceeds embedding dimensions {}, X size: {:d}".\
+            format(users, self.N)
+
+        if self.YTensor is None or not use_cache:
+            Y = tf.Variable(name="Y", dtype=tf.float64,
+                            initial_value=np.append(self.Y, np.zeros(shape=(1, self.K)), axis=0))
+            if use_cache: self.YTensor = Y
+        else: Y = self.YTensor
+        if self.XTensor is None or not use_cache:
+            X = tf.Variable(name="X", dtype=tf.float64,
+                            initial_value=np.append(self.X, np.zeros(shape=(1, self.K)), axis=0))
+            if use_cache: self.XTensor = X
+        else: X = self.XTensor
+        trace = self._run_single_step(Y, X, U, users, prefix="X update", use_cache=True)
+        self.X = X.numpy()[:-1]
+        self.Y = Y.numpy()[:-1]
+
+        if cb: cb.on_epoch_end(1)  # eval after
+        return [0, trace]
+
+    def _run_single_step(self, Y: tf.Tensor, X: tf.Tensor, R: sps.csr_matrix, users:Optional[np.array]=None, prefix="", use_cache=False):
 
         batchsize = self.batchsize
         N = X.shape[0]-1
@@ -192,17 +230,24 @@ class ALSTF(ALS):
 
         assert self.mode == 'train', "cannot call when mode is not train"
 
-        Y2 = tf.reshape(tf.tensordot(tf.transpose(Y), Y, axes=1, name='Y2'), shape=[1, k, k])
-        Lamb = tf.multiply(tf.constant(lamb, dtype=tf.float64),
-                           tf.linalg.eye(num_rows=k, batch_shape=[batchsize], dtype=tf.float64))
+        if users is None: users = np.arange(0,N)
+        if self.Y2Tensor is None or not use_cache:
+            Y2 = tf.reshape(tf.tensordot(tf.transpose(Y), Y, axes=1, name='Y2'), shape=[1, k, k])
+            if use_cache: self.Y2Tensor = Y2
+        else: Y2 = self.Y2Tensor
+        if self.LambTensor is None or not use_cache:
+            Lamb = tf.multiply(tf.constant(lamb, dtype=tf.float64), tf.linalg.eye(num_rows=k, batch_shape=[batchsize], dtype=tf.float64))
+            if use_cache: self.LambTensor = Lamb
+        else: Lamb = self.LambTensor
+
         diff = tf.Variable(dtype=tf.float64, initial_value=0.)
         batch_diff = tf.Variable(dtype=tf.float64, initial_value=0.)
 
         progbar = generic_utils.Progbar(np.ceil(float(N)/batchsize))
 
-        for i in range(0, N, batchsize):
+        for i in range(0, len(users), batchsize):
 
-            us = np.arange(i, min(i + batchsize, N))
+            us = users[i:min(i + batchsize, N)] #np.arange(i, )
             rs, ys = get_and_pad_ratings(R, us, M, batchsize=batchsize)
 
             Yp = tf.nn.embedding_lookup(Y, ys)
@@ -213,28 +258,28 @@ class ALSTF(ALS):
                 tf.constant(batchsize), tf.constant(k)
             )
 
-            if N < i + batchsize:
-                batch_diff.assign(tf.reduce_sum(tf.abs(X[i:N]-Xnew[:N - i])))
-                X[i:N].assign(Xnew[:N - i])
-            else:
-                batch_diff.assign(tf.reduce_sum(tf.abs(X[i:i + batchsize]-Xnew)))
-                X[i:i + batchsize].assign(Xnew)
+            us = tf.convert_to_tensor(us, dtype=tf.int32) # need to convert to tensor to index tensors
+            batch_diff.assign(tf.reduce_sum(tf.abs(tf.gather(X, us)-Xnew[:len(us)])))
+            us = tf.expand_dims(us, axis=1)
+            X.scatter_nd_update(us, Xnew[:len(us)])
 
             diff.assign_add(batch_diff)
             progbar.add(1, values=[(prefix + ' embedding delta', batch_diff/min(i + batchsize, N))])
 
         return diff / tf.cast(N, dtype=tf.float64)
 
-    def train(self, U, steps=10, cb:Callback=None):
+    def train(self, U, cb:Callback=None):
 
         assert self.mode == 'train', "cannot call when mode is not train"
 
         k = self.K
         M = self.M
         N = self.N
+        steps = self.steps
 
-        X = tf.Variable(name="X", dtype=tf.float64, initial_value=self.X)
-        Y = tf.Variable(name="Y", dtype=tf.float64, initial_value=self.Y)
+        # padding for reasons
+        X = tf.Variable(name="X", dtype=tf.float64, initial_value=np.append(self.X, np.zeros(shape=(1,self.K)), axis=0))
+        Y = tf.Variable(name="Y", dtype=tf.float64, initial_value=np.append(self.Y, np.zeros(shape=(1,self.K)), axis=0))
 
         Y[M].assign(tf.zeros([k], dtype=tf.float64))
         X[N].assign(tf.zeros([k], dtype=tf.float64))
@@ -249,14 +294,14 @@ class ALSTF(ALS):
 
             trace[i] = .5*(dX + dY)
 
-            self.X = X.numpy()
-            self.Y = Y.numpy()
+            self.X = X.numpy()[:-1] # remove padded dimension
+            self.Y = Y.numpy()[:-1]
             self.save_as_epoch(i)
             if cb:
                 cb.on_epoch_end(i)
 
-        self.X = X.numpy()
-        self.Y = Y.numpy()
+        self.X = X.numpy()[:-1]
+        self.Y = Y.numpy()[:-1]
 
         pd.DataFrame({
             'epoch': list(range(steps)), 'trace': trace,
@@ -368,7 +413,7 @@ class ALSTF_DS(ALSTF):
     def __init__(self, *args, **kwargs):
         super(ALSTF_DS, self).__init__(*args, **kwargs)
 
-    def train(self, U, steps=10, cb:Callback=None):
+    def train(self, U, cb:Callback=None):
 
         rows, cols, data = sps.find(U)
         indices = np.zeros(shape=(len(c), 2), dtype=np.int64)
@@ -380,6 +425,7 @@ class ALSTF_DS(ALSTF):
         k = self.K
         M = self.M
         N = self.N
+        steps = self.steps
         batchsize = self.batchsize
         lamb = self.lamb
         alpha = self.alpha

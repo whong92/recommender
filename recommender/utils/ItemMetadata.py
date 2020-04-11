@@ -45,6 +45,8 @@ class ExplicitDataFromCSV(ExplicitData):
         self.stats = pd.read_csv(stats_csv, index_col='item')
         self.df_train = pd.read_csv(ratings_train_csv, index_col=None)[['rating', 'item', 'user']]
         self.df_test = pd.read_csv(ratings_test_csv, index_col=None)[['rating', 'item', 'user']]
+        self.df_test.set_index('user', drop=False, inplace=True)
+        self.df_train.set_index('user', drop=False, inplace=True)
 
     def from_standard_dataset(self, data_folder):
         self.from_saved_csv(
@@ -71,7 +73,6 @@ class ExplicitDataFromCSV(ExplicitData):
             self.from_standard_dataset(**kwargs)
         else:
             self.from_raw_csv(**kwargs)
-        self.N, self.M = len(self.user_map), len(self.item_map)
         self.df_train_by_user = None
         self.df_test_by_user = None
         return
@@ -88,6 +89,41 @@ class ExplicitDataFromCSV(ExplicitData):
     def get_cat_map_item(self):
         return self.item_map
 
+    @property
+    def N(self):
+        return len(self.user_map)
+
+    @property
+    def M(self):
+        return len(self.item_map)
+
+    def add_user(self):
+        self.user_map = self.user_map.append(pd.DataFrame({'user': ['manual_add_{:d}'.format(self.N)]}, index=[self.N]))
+
+    def add_user_ratings(self, users, items, ratings, train=True):
+        for u in users: assert u in self.user_map.index
+        update = pd.DataFrame({'user': users, 'item': items, 'rating': ratings}).set_index('user', drop=False)
+        self.ratings = self.ratings.append(update)
+        if train: self.df_train = self.df_train.append(update)
+        else: self.df_test = self.df_test.append(update)
+        self.update_stats(update)
+        return
+
+    def pop_user_ratings(self, users, train=True):
+        for u in users: assert u in self.user_map.index
+        # TODO: fix, this is wrong!
+        self.ratings.drop(index=users, inplace=True, errors='ignore')
+        if train:
+            users = list(filter(lambda x:x in self.df_train.index, users))
+            dropped = self.df_train.loc[users,:]
+            self.df_train.drop(index=users, inplace=True, errors='ignore') # teehee
+        else:
+            users = list(filter(lambda x: x in self.df_test.index, users))
+            dropped = self.df_test.loc[users,:]
+            self.df_test.drop(index=users, inplace=True, errors='ignore')
+        self.update_stats(dropped, False)
+        return dropped
+
     @staticmethod
     def sanitize_ratings(ratings_csv, item, user, rating):
         return normalizeDf(csv2df(ratings_csv, item, user, rating))
@@ -98,6 +134,13 @@ class ExplicitDataFromCSV(ExplicitData):
         rating_stats.set_index('item', inplace=True)
         rating_stats.rename({'user': 'r_count'}, inplace=True)
         return rating_stats
+
+    def update_stats(self, update: pd.DataFrame, add=True):
+        # TODO: fix
+        for _, r in update.iterrows():
+            if add: self.stats.loc[r['item'], 'r_count'] += 1
+            else: self.stats.loc[r['item'], 'r_count'] -= 1
+        return
 
     @staticmethod
     def makeMetadataDf(item_map, item_md_csv, item_id_col):
@@ -143,12 +186,13 @@ class ExplicitDataFromCSV(ExplicitData):
         rows, cols, data = self.make_positive_arrays(D, ctype, rtype)
         return sps.csr_matrix((data, (cols, rows)), shape=(self.M, self.N))
 
-    def get_user_ratings(self, user):
-        if self.df_test_by_user is None:
-            self.df_test_by_user = self.df_test.set_index('user', drop=False)
-        if self.df_train_by_user is None:
-            self.df_train_by_user = self.df_train.set_index('user', drop=False)
-        return self.df_train_by_user.loc[[user]], self.df_test_by_user.loc[[user]]
+    def get_user_ratings(self, user, train=False):
+        ratings = pd.DataFrame(columns=self.df_train.keys())
+        if train and user in self.df_train.index:
+            ratings = self.df_train.loc[[user]]
+        if not train and user in self.df_test.index:
+            ratings = self.df_test.loc[[user]]
+        return ratings
 
 if __name__=="__main__":
     """

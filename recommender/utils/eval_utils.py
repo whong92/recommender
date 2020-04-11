@@ -63,14 +63,15 @@ def eval_model(model: Recommender, data: ExplicitDataFromCSV, batchsize:int=10, 
     if type(M) is int:
         M = np.arange(0,M,dtype=int)
 
-    AUC = -np.ones(shape=(M.shape[0],))
-    progbar = generic_utils.Progbar(M.shape[0])
+    AUC = -np.ones(shape=(len(M),))
+    progbar = generic_utils.Progbar(len(M))
 
-    for m in range(0,M.shape[0],batchsize):
-        t = min(M.shape[0], m + batchsize)
+    for m in range(0,len(M),batchsize):
+        t = min(len(M), m + batchsize)
         recs = model.recommend(M[m:t])[0]
         for i, rec in enumerate(recs):
-            df_train, df_test = data.get_user_ratings(m+i)
+            df_train = data.get_user_ratings(m+i, train=True)
+            df_test = data.get_user_ratings(m + i, train=False)
             df_test_rel = np.array(
                 df_test.loc[df_test['rating'] > 3.0, 'item'])
             df_train = np.array(df_train['item'])

@@ -9,6 +9,7 @@ from recommender.core.LMF import LogisticMatrixFactorizer, LMFCallback
 from recommender.utils.ItemMetadata import ExplicitDataFromCSV
 from .recommenderInterface import Recommender
 from ..utils.eval_utils import AUCCallback
+from typing import Iterable, Optional
 
 
 class RecommenderLMF(Recommender):
@@ -57,7 +58,10 @@ class RecommenderLMF(Recommender):
         self.training_data, self.validation_data = data.make_training_datasets(dtype='sparse')
         return
 
-    def train(self):
+    def add_users(self, num=1):
+        self.lmf._add_users(num=num)
+
+    def train(self, users: Optional[Iterable[int]]=None):
         assert self.mode is 'train', "must be in train mode!"
 
         Utest = sps.csr_matrix(self.validation_data.T)
@@ -71,10 +75,28 @@ class RecommenderLMF(Recommender):
         AUCC.set_model(self)
         LMFC = LMFCallback(Utrain, Utest, U, self.config['n_users'], self.config['n_items'])
         LMFC.set_model(self.lmf)
-        trace = self.lmf.fit(Utrain, Utest, U, cb=[LMFC, AUCC])
+        trace = self.lmf.fit(Utrain, Utest, U, cb=[LMFC, AUCC], users=users)
         AUCC.save_result(os.path.join(self.model_file, 'AUC.csv'))
         LMFC.save_result(os.path.join(self.model_file, 'LMFC.csv'))
         return trace
+
+    def train_update(self, users: Optional[Iterable[int]]=None):
+        if users is None:
+            users = np.arange(self.data.N)
+
+        Utest = sps.csr_matrix(self.validation_data.T)
+        Utrain = sps.csr_matrix(self.training_data.T)
+        U = Utrain + Utest
+
+        AUCC = AUCCallback(self.data, users, save_fn=lambda: self.lmf.save_as_epoch('best_updated'))
+        AUCC.set_model(self)
+        LMFC = LMFCallback(Utrain, Utest, U, self.config['n_users'], self.config['n_items'], users=users)
+        LMFC.set_model(self.lmf)
+        trace = self.lmf.fit(Utrain, Utest, U, users=users, cb=[LMFC, AUCC], exclude_phase={'Y'})
+        AUCC.save_result(os.path.join(self.model_file, 'AUC_update.csv'))
+        LMFC.save_result(os.path.join(self.model_file, 'LMFC_update.csv'))
+
+        return trace, [] #, AUCC.AUCe
 
     def save(self, path):
         self.lmf.save(os.path.join(path, 'model.h5'))

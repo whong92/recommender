@@ -14,9 +14,10 @@ from typing import Union
 from sklearn.metrics import average_precision_score
 from keras.callbacks import Callback
 import pandas as pd
+from typing import Optional, Set, Iterable
 
 class LMFCallback(Callback):
-    def __init__(self, Utrain: sps.csr_matrix, Utest: sps.csr_matrix, U: sps.csr_matrix, N: int, M: int):
+    def __init__(self, Utrain: sps.csr_matrix, Utest: sps.csr_matrix, U: sps.csr_matrix, N: int, M: int, users: Optional[Iterable[int]]=None):
         super(LMFCallback, self).__init__()
         self.Utrain = Utrain
         self.Utest = Utest
@@ -27,15 +28,18 @@ class LMFCallback(Callback):
         self.epochs = []
         self.N = N
         self.M = M
+        if users is not None: self.users = users
+        else: self.users = np.arange(N)
 
     def on_epoch_end(self, epoch, logs=None):
 
         N = self.N
         M = self.M
+        users = self.users
 
-        up, yp, rp = get_pos_ratings(self.Utest, np.arange(N), M)
+        up, yp, rp = get_pos_ratings(self.Utest, users, M)
         uup, nup = np.unique(up, return_counts=True)
-        un, yn = get_neg_ratings(self.U, np.arange(N), M, samples_per_user=nup)
+        un, yn = get_neg_ratings(self.U, users, M, samples_per_user=nup)
         rn = np.zeros(shape=un.shape, dtype=float)
         eval_result = self.model.model.evaluate(
             {'u_in': up, 'i_in': yp},
@@ -111,7 +115,51 @@ class LogisticMatrixFactorizer(object):
         self.mode = mode
         self.initialize(model_path, N, M, f, lr, lamb, alpha=alpha, bias=bias, epochs=epochs, batchsize=batchsize)
 
-    def initialize(self, model_path, N, M, f=10, lr=0.01, lamb=0.01, alpha=40.0, epochs=30, batchsize=5000, bias=False):
+    @staticmethod
+    def make_model(N, M, f=10, lamb=0.01, bias=False):
+
+        u_in = Input(shape=(1,), dtype='int32', name='u_in')
+        i_in = Input(shape=(1,), dtype='int32', name='i_in')
+
+
+        X = Embedding(N, f, dtype='float32',
+                      embeddings_regularizer=regularizers.l2(lamb), input_length=1,
+                      embeddings_initializer=initializers.RandomNormal(seed=42), name='P')
+        Y = Embedding(M, f, dtype='float32',
+                      embeddings_regularizer=regularizers.l2(lamb), input_length=1,
+                      embeddings_initializer=initializers.RandomNormal(seed=42), name='Q')
+
+        x = X(u_in)
+        y = Y(i_in)
+        vars = {'X': X, 'Y': Y}
+
+        if bias:
+            # currently does not work with tf.function: https://github.com/keras-team/keras/issues /13671
+            # seems like Multiply() and Add() have problems? TODO: try to recreate!
+            Bu = Embedding(N, 1, dtype='float32', embeddings_initializer='random_normal', name='Bu')
+            Bi = Embedding(M, 1, dtype='float32', embeddings_initializer='random_normal', name='Bi')
+            bp = Bu(u_in)
+            bq = Bi(i_in)
+            z = Dot(2)([x, y])
+            vars.update({'Bu': Bu, 'Bi': Bi})
+            # Add(name='rhat')([Flatten()(Dot(2)([x, y])), bp, bq])
+            # Need to do this because the add layer doesn't work in tf function
+            rhat = Flatten(name='rhat')(Lambda(lambda x: x[0] + x[1] + x[2])([z, bp, bq]))
+            phat = Activation('sigmoid', name='phat')(rhat)
+        else:
+            rhat = Flatten(name='rhat')(Dot(2)([x, y]))
+            phat = Activation('sigmoid', name='phat')(rhat)
+
+        model = Model(inputs=[u_in, i_in], outputs=[phat, rhat, x, y])
+
+        model.compile(
+            optimizers.Adam(0.1), loss={'phat': 'mean_squared_error'}, metrics={'phat': 'mean_squared_error'}
+        )
+        return model, vars
+
+    def initialize(
+            self, model_path, N, M, f=10, lr=0.01, lamb=0.01, alpha=40.0, epochs=30, batchsize=5000, bias=False,
+    ):
 
         self.model_path = model_path
         self.epochs = epochs
@@ -123,58 +171,37 @@ class LogisticMatrixFactorizer(object):
             self.model.summary()
             return
 
-        self.M = M
-        self.N = N
-
-        u_in = Input(shape=(1,), dtype='int32', name='u_in')
-        i_in = Input(shape=(1,), dtype='int32', name='i_in')
-
-        X = Embedding(N, f, dtype='float32',
-                      embeddings_regularizer=regularizers.l2(lamb), input_length=1,
-                      embeddings_initializer=initializers.RandomNormal(seed=42), name='P')
-        Y = Embedding(M, f, dtype='float32',
-                      embeddings_regularizer=regularizers.l2(lamb), input_length=1,
-                      embeddings_initializer=initializers.RandomNormal(seed=42), name='Q')
-
-        x = X(u_in)
-        y = Y(i_in)
-        self.vars = {'X': X, 'Y': Y}
-
-        if bias:
-            # currently does not work with tf.function: https://github.com/keras-team/keras/issues /13671
-            # seems like Multiply() and Add() have problems? TODO: try to recreate!
-            Bu = Embedding(N, 1, dtype='float32', embeddings_initializer='random_normal', name='Bu')
-            Bi = Embedding(M, 1, dtype='float32', embeddings_initializer='random_normal', name='Bi')
-            bp = Bu(u_in)
-            bq = Bi(i_in)
-            z = Dot(2)([x, y])
-            self.vars.update({'Bu': Bu, 'Bi': Bi})
-            # Add(name='rhat')([Flatten()(Dot(2)([x, y])), bp, bq])
-            # Need to do this because the add layer doesn't work in tf function
-            rhat = Flatten(name='rhat')(Lambda(lambda x: x[0]+x[1]+x[2])([z, bp, bq]))
-            phat = Activation('sigmoid', name='phat')(rhat)
-        else:
-            rhat = Flatten(name='rhat')(Dot(2)([x, y]))
-            phat = Activation('sigmoid', name='phat')(rhat)
-
-        model = Model(inputs=[u_in, i_in], outputs=[phat, rhat, x, y])
+        self.model_kwargs = {'N':N, 'M':M, 'f':f, 'lamb': lamb, 'bias':bias}
 
         loss_fn = PLMFLoss(alpha=alpha)
-
-        self.model = model
-        self.model.compile(
-            optimizers.Adam(lr), loss={'phat': 'mean_squared_error'}, metrics={'phat': 'mean_squared_error'}
-        )
+        self.model, self.vars = LogisticMatrixFactorizer.make_model(**self.model_kwargs)
         self.loss_fn = loss_fn
 
         self.model.summary(line_length=88)
 
         return
 
-    def fit(self, Utrain, Utest, U, cb: Union[Callback, List[Callback]]=None): #, u_train, i_train, r_train, u_test, i_test, r_test):
+    def _add_users(self, num=1):
 
-        if cb is not None and type(cb)==Callback:
-            cb = [cb]
+        self.model_kwargs['N'] += num
+        # update old embeddings
+        new_model, new_vars = LogisticMatrixFactorizer.make_model(**self.model_kwargs)
+        oldX = self.model.get_layer('P').get_weights()[0]
+        newX = np.concatenate([oldX, np.random.normal(0,1.,size=(num, self.model_kwargs['f']))])
+        new_vars['X'].set_weights([newX])
+        new_vars['Y'].set_weights(self.model.get_layer('Q').get_weights())
+        # update old biases
+        if self.model_kwargs['bias']:
+            oldBu = self.model.get_layer('Bu').get_weights()[0]
+            newBu = np.concatenate([oldBu, np.random.normal(0, 1., size=(num, 1))])
+            new_vars['Bu'].set_weights([newBu])
+            new_vars['Bi'].set_weights(self.model.get_layer('Bi').get_weights())
+        self.model = new_model
+        self.vars = new_vars
+        self.model.summary()
+
+    def fit(self, Utrain, Utest, U, users:Optional[np.array]=None, cb: Union[Callback, List[Callback]]=None,
+            exclude_phase:Optional[Set]=None): #, u_train, i_train, r_train, u_test, i_test, r_test):
 
         model = self.model
         X = self.vars['X']
@@ -183,65 +210,64 @@ class LogisticMatrixFactorizer(object):
         Bi = self.vars.get('Bi')
         loss_fn = self.loss_fn
         epochs = self.epochs
-
-        num_seen = tf.Variable(shape=(), initial_value=0., dtype='float32')
-        cur_batchsize = tf.Variable(shape=(), initial_value=0., dtype='float32')
-        acc_loss = tf.Variable(shape=(), initial_value=0.)
-
-        opt = tf.keras.optimizers.Adam(self.lr)
-
-        Y.trainable = False
-        if Bi is not None:
-            Bi.trainable = False
-        acc_grads_X = []
-        for weight in model.trainable_weights:
-            shape = weight.shape
-            acc_grads_X.append(tf.Variable(shape=shape, initial_value=np.zeros(shape=shape, dtype='float32')))
-        train_step_X = tf.function(experimental_relax_shapes=True)(train_step)
-
-        Y.trainable = True
-        X.trainable = False
-        if Bu is not None:
-            Bi.trainable = True
-            Bu.trainable = False
-        acc_grads_Y = []
-        for weight in model.trainable_weights:
-            shape = weight.shape
-            acc_grads_Y.append(tf.Variable(shape=shape, initial_value=np.zeros(shape=shape, dtype='float32')))
-        train_step_Y = tf.function(experimental_relax_shapes=True)(train_step)  # force retrace
-        X.trainable = True
+        batchsize=self.batchsize
 
         N = X.input_dim
         M = Y.input_dim
         trace = np.zeros(shape=(epochs))
 
+        if cb is not None and type(cb)==Callback: cb = [cb]
+        if users is None: users = np.arange(0, N)
+
+        num_seen = tf.Variable(shape=(), initial_value=0., dtype='float32')
+        cur_batchsize = tf.Variable(shape=(), initial_value=0., dtype='float32')
+        acc_loss = tf.Variable(shape=(), initial_value=0.)
+
+        opt = tf.keras.optimizers.Adam(self.lr, clipnorm=10.)
+
+        phaseVariables = {
+            'X': {'vars': [X,Bu], 'acc_grads': [], 'train_step_fn': None},
+            'Y': {'vars': [Y,Bi], 'acc_grads': [], 'train_step_fn': None},
+        }
+
+        for p, stuff_p in phaseVariables.items():
+            stuff_p['vars'] =  list(filter(lambda x: x is not None, stuff_p['vars']))
+
+        for p, stuff_p in phaseVariables.items():
+            for q, stuff_q in phaseVariables.items():
+                for v in stuff_q['vars']: v.trainable=False
+            for v in stuff_p['vars']: v.trainable = True
+            acc_grads = []
+            for weight in model.trainable_weights:
+                shape = weight.shape
+                acc_grads.append(tf.Variable(shape=shape, initial_value=np.zeros(shape=shape, dtype='float32')))
+            stuff_p['acc_grads'] = acc_grads
+            stuff_p['train_step_fn'] = tf.function(experimental_relax_shapes=True)(train_step) # for retrace
+
+        if cb is not None:
+            for c in cb: c.on_epoch_end(-1)
+
         for epoch in range(epochs):
 
             for phase in ['X', 'Y']:
 
-                if phase == 'X':
-                    X.trainable = True
-                    Y.trainable = False
-                    if Bu is not None:
-                        Bi.trainable = False
-                        Bu.trainable = True
-                    acc_grads = acc_grads_X
-                    train_step_fn = train_step_X
-                else:
-                    Y.trainable = True
-                    X.trainable = False
-                    if Bi is not None:
-                        Bi.trainable = True
-                        Bu.trainable = False
-                    acc_grads = acc_grads_Y
-                    train_step_fn = train_step_Y
+                if exclude_phase is not None:
+                    if phase in exclude_phase: continue
 
-                progbar = generic_utils.Progbar(N)
+                for p, stuff in phaseVariables.items():
+                    for v in stuff['vars']: v.trainable = False
+                stuff = phaseVariables[phase]
+                for v in stuff['vars']: v.trainable = True
+                acc_grads = stuff['acc_grads']
+                train_step_fn = stuff['train_step_fn']  # for retrace
 
-                for i in range(0, N, self.batchsize):
-                    up, yp, rp = get_pos_ratings(Utrain, np.arange(i, min(i + self.batchsize, N)), M)
+                progbar = generic_utils.Progbar(len(users))
+
+                for i in range(0, len(users), batchsize):
+                    us = users[i:min(i + batchsize, len(users))]  # np.arange(i, min(i + self.batchsize, N))
+                    up, yp, rp = get_pos_ratings(Utrain, us, M)
                     uup, nup = np.unique(up, return_counts=True)
-                    un, yn = get_neg_ratings(U, np.arange(i, min(i+self.batchsize, N)), M, samples_per_user=nup)
+                    un, yn = get_neg_ratings(U, us, M, samples_per_user=nup)
                     rn = np.zeros(shape=un.shape, dtype=float)
                     x = tf.constant(np.expand_dims(np.concatenate([up, un]), axis=1), tf.int32)
                     y = tf.constant(np.expand_dims(np.concatenate([yp, yn]), axis=1), tf.int32)
@@ -249,7 +275,7 @@ class LogisticMatrixFactorizer(object):
                     cur_batchsize.assign(float(x.shape[0]))
                     train_step_fn(model, x, y, z, loss_fn, acc_grads, acc_loss, num_seen, cur_batchsize)
                     num_seen.assign_add(cur_batchsize)
-                    progbar.add(min(self.batchsize, N-i), values=[(phase + ' loss', acc_loss)])
+                    progbar.add(min(self.batchsize, len(users)-i), values=[(phase + ' loss', acc_loss)])
 
                 trace[epoch] += acc_loss
                 num_seen.assign(0.)
@@ -260,8 +286,8 @@ class LogisticMatrixFactorizer(object):
                     acc_grad.assign(tf.zeros(shape=acc_grad.shape, dtype=acc_grad.dtype))
 
             if cb is not None:
-                for c in cb:
-                    c.on_epoch_end(epoch)
+                for c in cb: c.on_epoch_end(epoch)
+
             self.save_as_epoch(epoch)
 
         return trace
@@ -274,7 +300,7 @@ class LogisticMatrixFactorizer(object):
         self.model.save(os.path.join(self.model_path, model_name.format(epoch)))
 
     def predict(self, u, i):
-        return self.model.predict({'u_in': u, 'i_in': i}, batch_size=10000)
+        return self.model.predict({'u_in': u, 'i_in': i}, batch_size=50000)
 
 class PLMFLoss(keras.losses.Loss):
     """
