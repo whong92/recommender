@@ -41,6 +41,7 @@ if __name__=="__main__":
     # test_ratings_holdout = d.pop_user_ratings(users_remove, train=False)
     # train with rating removed
 
+    save_path = os.path.join(model_folder, "LMF_2020-04-12.16-12-42")
     save_path = os.path.join(model_folder, "LMF_{:s}".format(datetime.now().strftime("%Y-%m-%d.%H-%M-%S")))
     if not os.path.exists(save_path):
         os.mkdir(save_path)
@@ -50,16 +51,17 @@ if __name__=="__main__":
         lmf_kwargs={'f': 20, 'lamb': 1e-06, 'alpha': 5., 'lr': 0.1, 'bias': False, 'epochs': 10},
         model_path=save_path
     )
-    # tf.logging.set_verbosity(tf.logging.INFO)
 
     # array input format - onnly for smaller datasets
     rlmf.input_data(d)
     trace = rlmf.train(users=np.setdiff1d(np.arange(d.N), users_remove))
     # plt.plot(trace)
     # plt.show()
-
     rlmf.save(save_path)
 
+    # reload model
+    rlmf = RecommenderLMF(mode='predict', model_path=save_path)
+    rlmf.input_data(d)
     # update model with removed ratings, something like this
     d.add_user_ratings(train_ratings_holdout['user'], train_ratings_holdout['item'], train_ratings_holdout['rating'])
     rlmf.input_data(d) # update data, this can be made more efficient ???
@@ -77,6 +79,5 @@ if __name__=="__main__":
     d.add_user_ratings(new_ratings_test['user'], new_ratings_test['item'], new_ratings_test['rating'], train=False)
 
     # train on new user
-    rlmf.lmf._add_users(1)
-    rlmf.input_data(d)
+    rlmf.add_users(1)
     trace, auc = rlmf.train_update(users=np.array([d.N - 1]))

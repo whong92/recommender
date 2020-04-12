@@ -184,7 +184,7 @@ class ExplicitDataFromCSV(ExplicitData):
 
     def make_sparse_matrices(self, D:pd.DataFrame, ctype:np.dtype=np.int32, rtype:np.dtype=np.float64):
         rows, cols, data = self.make_positive_arrays(D, ctype, rtype)
-        return sps.csr_matrix((data, (cols, rows)), shape=(self.M, self.N))
+        return sps.csr_matrix((data, (rows, cols)), shape=(self.N, self.M))
 
     def get_user_ratings(self, user, train=False):
         ratings = pd.DataFrame(columns=self.df_train.keys())

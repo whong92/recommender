@@ -35,7 +35,7 @@ if __name__=="__main__":
         os.mkdir(save_path)
 
     rals = RecommenderALS(mode='train', n_users=d.N, n_items=d.M,
-                        als_kwargs={'K':10, 'lamb':1e-06, 'alpha':40., 'steps': 10},
+                        als_kwargs={'K':10, 'lamb':1e-06, 'alpha':40., 'steps': 5},
                         model_path=save_path
                         )
     # tf.logging.set_verbosity(tf.logging.INFO)
@@ -43,7 +43,11 @@ if __name__=="__main__":
     # array input format - onnly for smaller datasets
     rals.input_data(d)
     trace = rals.train()
-    plt.plot(trace)
+    plt.plot(trace[0])
+    plt.title('trace')
+    plt.show()
+    plt.plot(trace[1])
+    plt.title('AUC')
     plt.show()
 
     rals.save(save_path)

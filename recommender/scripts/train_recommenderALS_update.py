@@ -28,37 +28,34 @@ if __name__=="__main__":
     model_folder = 'D:\\PycharmProjects\\recommender\\models'
 
     d = ExplicitDataFromCSV(True, data_folder=data_folder)
-    # d.save(data_folder)
 
     # remove training data for 10 users to test
     users_remove = np.arange(0, d.N, d.N//10)
 
     train_ratings_holdout = d.pop_user_ratings(users_remove)
 
-    # test_ratings_holdout = d.pop_user_ratings(users_remove, train=False)
     # train with rating removed
-
     save_path = os.path.join(model_folder, "ALS_{:s}".format(datetime.now().strftime("%Y-%m-%d.%H-%M-%S")))
     if not os.path.exists(save_path):
         os.mkdir(save_path)
 
     rals = RecommenderALS(mode='train', n_users=d.N, n_items=d.M,
-                        als_kwargs={'K':20, 'lamb':1e-06, 'alpha':40., 'steps': 10},
+                        als_kwargs={'K':20, 'lamb':1e-06, 'alpha':40., 'steps': 5},
                         model_path=save_path
                         )
-    # tf.logging.set_verbosity(tf.logging.INFO)
 
     # array input format - onnly for smaller datasets
     rals.input_data(d)
     trace = rals.train()
     # plt.plot(trace)
     # plt.show()
-
     rals.save(save_path)
 
+    # reload model
+    rals = RecommenderALS(mode='predict', model_path=save_path)
+    rals.input_data(d)
     # update model with removed ratings, something like this
     d.add_user_ratings(train_ratings_holdout['user'], train_ratings_holdout['item'], train_ratings_holdout['rating'])
-    rals.input_data(d) # update data
     trace, auc = rals.train_update(users=users_remove)
     print(trace, auc)
 
@@ -72,5 +69,4 @@ if __name__=="__main__":
     d.add_user_ratings(new_ratings_test['user'], new_ratings_test['item'], new_ratings_test['rating'], train=False)
 
     rals.add_users(1)
-    rals.input_data(d)
     trace, auc = rals.train_update(users=np.array([d.N - 1]))

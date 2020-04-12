@@ -55,7 +55,6 @@ class RecommenderLMF(Recommender):
 
     def input_data(self, data: ExplicitDataFromCSV):
         self.data = data
-        self.training_data, self.validation_data = data.make_training_datasets(dtype='sparse')
         return
 
     def add_users(self, num=1):
@@ -64,8 +63,7 @@ class RecommenderLMF(Recommender):
     def train(self, users: Optional[Iterable[int]]=None):
         assert self.mode is 'train', "must be in train mode!"
 
-        Utest = sps.csr_matrix(self.validation_data.T)
-        Utrain = sps.csr_matrix(self.training_data.T)
+        Utrain, Utest = self.data.make_training_datasets(dtype='sparse')
         U = Utrain + Utest
 
         AUCC = AUCCallback(
@@ -84,11 +82,11 @@ class RecommenderLMF(Recommender):
         if users is None:
             users = np.arange(self.data.N)
 
-        Utest = sps.csr_matrix(self.validation_data.T)
-        Utrain = sps.csr_matrix(self.training_data.T)
+        # TODO: improve so not required to construct the entire dataset for an update
+        Utrain, Utest = self.data.make_training_datasets(dtype='sparse')
         U = Utrain + Utest
 
-        AUCC = AUCCallback(self.data, users, save_fn=lambda: self.lmf.save_as_epoch('best_updated'))
+        AUCC = AUCCallback(self.data, users, save_fn=lambda: self.lmf.save_as_epoch('best_updated'), batchsize=100)
         AUCC.set_model(self)
         LMFC = LMFCallback(Utrain, Utest, U, self.config['n_users'], self.config['n_items'], users=users)
         LMFC.set_model(self.lmf)
@@ -96,7 +94,7 @@ class RecommenderLMF(Recommender):
         AUCC.save_result(os.path.join(self.model_file, 'AUC_update.csv'))
         LMFC.save_result(os.path.join(self.model_file, 'LMFC_update.csv'))
 
-        return trace, [] #, AUCC.AUCe
+        return trace,  AUCC.AUCe
 
     def save(self, path):
         self.lmf.save(os.path.join(path, 'model.h5'))

@@ -55,13 +55,15 @@ class RecommenderMF(Recommender):
         return MatrixFactorizer
 
     def input_data(self, data: ExplicitDataFromCSV):
-        self.data_train, self.data_test = data.make_training_datasets(dtype='dense')
+        self.data = data
+
 
     def train(self):
         assert self.mode is 'train', "must be in train mode!"
+        data_train, data_test = self.data.make_training_datasets(dtype='dense')
         self.estimator.fit(
-            *self.data_train,
-            *self.data_test,
+            *data_train,
+            *data_test,
         )
 
     def save(self, path):

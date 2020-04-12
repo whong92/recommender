@@ -3,6 +3,7 @@ import numpy as np
 import scipy.sparse as sps
 import tensorflow as tf
 from tqdm import tqdm
+from typing import Iterable, Union
 
 
 def csv2df(file, item, user, rating):
@@ -130,3 +131,63 @@ def splitDf(df, train_test_split=0.8):
     test_df = df.iloc[perm[int(len(df) * train_test_split):]]
     return train_df, test_df
 
+def sample_neg(pos:np.array, M:int, s:int):
+    neg = np.zeros(shape=(0,), dtype=int)
+    while(neg.shape[0]==0):
+        neg = np.random.choice(M, size=min(s,M), replace=False).astype(int)
+        neg = neg[np.in1d(neg, pos, assume_unique=True, invert=True)]
+        break
+    return neg
+
+def get_neg_ratings(R: sps.csr_matrix, users:Iterable[int], M:int, samples_per_user:Union[np.ndarray, int]=50):
+    """
+    fetches negative ratings from a utility matrix R for given an array of users
+    :param R:
+    :param users:
+    :param M:
+    :param samples_per_user:
+    :return: array of users and negative items
+    """
+
+    ru = R[users, :]
+    if type(samples_per_user) is int:
+        samples_per_user = np.ones(shape=(users.shape[0],), dtype=int)*samples_per_user
+    ns = np.sum(samples_per_user)
+    up = np.zeros(ns, dtype=int)
+    yp = np.zeros(ns, dtype=int)
+
+    offs = 0
+    for u, (user, s) in enumerate(zip(users, samples_per_user)):
+        neg = sample_neg(ru[u].indices, M, s)
+        up[offs: offs+neg.shape[0]] = user
+        yp[offs: offs+neg.shape[0]] = neg
+        offs += neg.shape[0]
+
+    return up[:offs], yp[:offs]
+
+def get_pos_ratings(R: sps.csr_matrix, users:Iterable[int], M:int, batchsize=None):
+    """
+    fetches positive ratings and their values from a sparse utility matrix R for a given array of users
+    :param R:
+    :param users:
+    :param M:
+    :param batchsize:
+    :return: users, items, ratings/interactions
+    """
+
+    ru = R[users, :]
+    l = np.max(ru.getnnz(axis=1))
+    if batchsize is None:
+        batchsize = len(users)
+    up = np.zeros(shape=(batchsize*l), dtype=np.int)
+    rp = np.zeros(shape=(batchsize*l), dtype=np.float)
+    yp = M*np.ones(shape=(batchsize*l), dtype=np.int)
+    offs = 0
+    for u, user in enumerate(users):
+        numy = ru[u].data.shape[0]
+        up[offs: offs+numy] = user
+        rp[offs: offs+numy] = ru[u].data
+        yp[offs: offs+numy] = ru[u].indices
+        offs += numy
+
+    return up[:offs], yp[:offs], rp[:offs]

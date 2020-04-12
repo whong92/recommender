@@ -15,6 +15,7 @@ from sklearn.metrics import average_precision_score
 from keras.callbacks import Callback
 import pandas as pd
 from typing import Optional, Set, Iterable
+from recommender.utils.utils import get_pos_ratings, get_neg_ratings
 
 class LMFCallback(Callback):
     def __init__(self, Utrain: sps.csr_matrix, Utest: sps.csr_matrix, U: sps.csr_matrix, N: int, M: int, users: Optional[Iterable[int]]=None):
@@ -64,51 +65,6 @@ class LMFCallback(Callback):
     def save_result(self, outfile):
         pd.DataFrame({'epoch': self.epochs, 'AP': self.APs, 'EP': self.ep, 'EN':self.en}).to_csv(outfile, index=False)
 
-def sample_neg(pos, M, s):
-    neg = np.zeros(shape=(0,), dtype=int)
-    while(neg.shape[0]==0):
-        neg = np.random.choice(M, size=min(s,M), replace=False).astype(int)
-        neg = neg[np.in1d(neg, pos, assume_unique=True, invert=True)]
-        break
-    return neg
-
-def get_neg_ratings(R, users, M, samples_per_user:Union[np.ndarray, int]=50):
-
-    ru = R[users, :]
-    if type(samples_per_user) is int:
-        samples_per_user = np.ones(shape=(users.shape[0],), dtype=int)*samples_per_user
-    ns = np.sum(samples_per_user)
-    up = np.zeros(ns, dtype=int)
-    yp = np.zeros(ns, dtype=int)
-
-    offs = 0
-    for u, (user, s) in enumerate(zip(users, samples_per_user)):
-        neg = sample_neg(ru[u].indices, M, s)
-        up[offs: offs+neg.shape[0]] = user
-        yp[offs: offs+neg.shape[0]] = neg
-        offs += neg.shape[0]
-
-    return up[:offs], yp[:offs]
-
-def get_pos_ratings(R, users, M, batchsize=None):
-
-    ru = R[users, :]
-    l = np.max(ru.getnnz(axis=1))
-    if batchsize is None:
-        batchsize = len(users)
-    up = np.zeros(shape=(batchsize*l), dtype=np.int)
-    rp = np.zeros(shape=(batchsize*l), dtype=np.float)
-    yp = M*np.ones(shape=(batchsize*l), dtype=np.int)
-    offs = 0
-    for u, user in enumerate(users):
-        numy = ru[u].data.shape[0]
-        up[offs: offs+numy] = user
-        rp[offs: offs+numy] = ru[u].data
-        yp[offs: offs+numy] = ru[u].indices
-        offs += numy
-
-    return up[:offs], yp[:offs], rp[:offs]
-
 class LogisticMatrixFactorizer(object):
 
     def __init__(self, model_path, N, M, f=10, lr=0.01, lamb=0.01, alpha=40.0, bias=False, epochs=30, batchsize=5000, mode='train'):
@@ -131,7 +87,6 @@ class LogisticMatrixFactorizer(object):
 
         x = X(u_in)
         y = Y(i_in)
-        vars = {'X': X, 'Y': Y}
 
         if bias:
             # currently does not work with tf.function: https://github.com/keras-team/keras/issues /13671
@@ -141,7 +96,6 @@ class LogisticMatrixFactorizer(object):
             bp = Bu(u_in)
             bq = Bi(i_in)
             z = Dot(2)([x, y])
-            vars.update({'Bu': Bu, 'Bi': Bi})
             # Add(name='rhat')([Flatten()(Dot(2)([x, y])), bp, bq])
             # Need to do this because the add layer doesn't work in tf function
             rhat = Flatten(name='rhat')(Lambda(lambda x: x[0] + x[1] + x[2])([z, bp, bq]))
@@ -155,7 +109,18 @@ class LogisticMatrixFactorizer(object):
         model.compile(
             optimizers.Adam(0.1), loss={'phat': 'mean_squared_error'}, metrics={'phat': 'mean_squared_error'}
         )
-        return model, vars
+        return model
+
+    @property
+    def vars(self):
+        if self.model is None:
+            return {}
+        vars = {'X': self.model.get_layer('P'), 'Y': self.model.get_layer('Q')}
+        try:
+            vars.update({'Bu': self.model.get_layer('Bu'), 'Bi': self.model.get_layer('Bi'), })
+        except ValueError:
+            print("no bias detected for model")
+        return vars
 
     def initialize(
             self, model_path, N, M, f=10, lr=0.01, lamb=0.01, alpha=40.0, epochs=30, batchsize=5000, bias=False,
@@ -166,38 +131,34 @@ class LogisticMatrixFactorizer(object):
         self.batchsize = batchsize
         self.lr = lr
 
-        if self.mode == 'predict':
-            self.model = load_model(self.model_path, compile=True)
-            self.model.summary()
-            return
-
         self.model_kwargs = {'N':N, 'M':M, 'f':f, 'lamb': lamb, 'bias':bias}
 
+        if self.mode == 'predict':
+            self.model = load_model(self.model_path, compile=True)
+        else:
+            self.model = LogisticMatrixFactorizer.make_model(**self.model_kwargs)
+
         loss_fn = PLMFLoss(alpha=alpha)
-        self.model, self.vars = LogisticMatrixFactorizer.make_model(**self.model_kwargs)
         self.loss_fn = loss_fn
-
         self.model.summary(line_length=88)
-
         return
 
     def _add_users(self, num=1):
 
         self.model_kwargs['N'] += num
         # update old embeddings
-        new_model, new_vars = LogisticMatrixFactorizer.make_model(**self.model_kwargs)
+        new_model= LogisticMatrixFactorizer.make_model(**self.model_kwargs)
         oldX = self.model.get_layer('P').get_weights()[0]
         newX = np.concatenate([oldX, np.random.normal(0,1.,size=(num, self.model_kwargs['f']))])
-        new_vars['X'].set_weights([newX])
-        new_vars['Y'].set_weights(self.model.get_layer('Q').get_weights())
+        new_model.get_layer('P').set_weights([newX])
+        new_model.get_layer('Q').set_weights(self.model.get_layer('Q').get_weights())
         # update old biases
         if self.model_kwargs['bias']:
             oldBu = self.model.get_layer('Bu').get_weights()[0]
             newBu = np.concatenate([oldBu, np.random.normal(0, 1., size=(num, 1))])
-            new_vars['Bu'].set_weights([newBu])
-            new_vars['Bi'].set_weights(self.model.get_layer('Bi').get_weights())
+            new_model.get_layer('Bu').set_weights([newBu])
+            new_model.get_layer('Bi').set_weights(self.model.get_layer('Bi').get_weights())
         self.model = new_model
-        self.vars = new_vars
         self.model.summary()
 
     def fit(self, Utrain, Utest, U, users:Optional[np.array]=None, cb: Union[Callback, List[Callback]]=None,
@@ -297,7 +258,8 @@ class LogisticMatrixFactorizer(object):
 
     def save_as_epoch(self, epoch:Union[str,int]='last'):
         model_name = 'model-{:03d}.h5' if type(epoch) == int else 'model-{:s}.h5'
-        self.model.save(os.path.join(self.model_path, model_name.format(epoch)))
+        save_dir = self.model_path if os.path.isdir(self.model_path) else os.path.dirname(self.model_path)
+        self.model.save(os.path.join(save_dir, model_name.format(epoch)))
 
     def predict(self, u, i):
         return self.model.predict({'u_in': u, 'i_in': i}, batch_size=50000)

@@ -2,8 +2,8 @@ import pandas as pd
 import numpy as np
 from keras.callbacks import Callback
 from .ItemMetadata import ExplicitDataFromCSV
-from tqdm import tqdm
 from recommender.recommender.recommenderInterface import Recommender
+from recommender.utils.utils import get_pos_ratings
 from keras.utils import generic_utils
 import tensorflow as tf
 from typing import Callable, Any, Union, Iterable
@@ -66,15 +66,15 @@ def eval_model(model: Recommender, data: ExplicitDataFromCSV, batchsize:int=10, 
     AUC = -np.ones(shape=(len(M),))
     progbar = generic_utils.Progbar(len(M))
 
+    Utrain, Utest = data.make_training_datasets(dtype='sparse')
+
     for m in range(0,len(M),batchsize):
         t = min(len(M), m + batchsize)
         recs = model.recommend(M[m:t])[0]
         for i, rec in enumerate(recs):
-            df_train = data.get_user_ratings(m+i, train=True)
-            df_test = data.get_user_ratings(m + i, train=False)
-            df_test_rel = np.array(
-                df_test.loc[df_test['rating'] > 3.0, 'item'])
-            df_train = np.array(df_train['item'])
+            _, df_train, _ = get_pos_ratings(Utrain, [m+i], data.M)
+            _, df_test, r_test = get_pos_ratings(Utest, [m + i], data.M)
+            df_test_rel = df_test[r_test>3.0]
             auc = compute_auc(rec, df_test_rel, df_train)
 
             AUC[m+i] = auc

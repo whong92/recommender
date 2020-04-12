@@ -55,7 +55,7 @@ class RecommenderALS(Recommender):
 
     def input_data(self, data: ExplicitDataFromCSV):
         self.data = data
-        self.training_data, self.validation_data = data.make_training_datasets(dtype='sparse')
+        # self.training_data, self.validation_data = data.make_training_datasets(dtype='sparse')
         return
 
     def add_users(self, num=1):
@@ -68,7 +68,8 @@ class RecommenderALS(Recommender):
             save_fn=lambda: self.als.save_as_epoch('best')
         )
         AUCC.set_model(self)
-        trace = self.als.train(sps.csr_matrix(self.training_data.T), cb=AUCC)
+        Utrain, _ = self.data.make_training_datasets(dtype='sparse')
+        trace = self.als.train(Utrain, cb=AUCC)
         AUCC.save_result(os.path.join(self.model_file, 'AUC.csv'))
         return trace, AUCC.AUCe
 
@@ -77,7 +78,9 @@ class RecommenderALS(Recommender):
             users = np.arange(self.data.N)
         AUCC = AUCCallback(self.data, users, save_fn=lambda: self.als.save_as_epoch('best_updated'))
         AUCC.set_model(self)
-        trace = self.als.train_update(sps.csr_matrix(self.training_data.T), users, cb=AUCC, use_cache=True)
+        # TODO: improve so not required to construct the entire dataset for an update
+        Utrain, _ = self.data.make_training_datasets(dtype='sparse')
+        trace = self.als.train_update(Utrain, users, cb=AUCC, use_cache=True)
         AUCC.save_result(os.path.join(self.model_file, 'AUC_update.csv'))
         return trace, AUCC.AUCe
 

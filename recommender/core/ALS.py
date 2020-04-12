@@ -23,6 +23,8 @@ class ALS:
         self.M = M
         self.N = N
         self.steps = steps
+        self.lamb = lamb
+        self.alpha = alpha
         if mode == 'train':
             self.K = K
             # dense feature matrices
@@ -36,16 +38,13 @@ class ALS:
             else:
                 np.random.seed(42)
                 self.Y = np.random.normal(0, 1/np.sqrt(self.K), size=(M, self.K))
-            self.lamb = lamb
-            self.alpha = alpha
         else:
             assert model_path is not None, "model path required in predict mode"
             self.X = np.load(os.path.join(model_path, 'X.npy'))
             self.Y = np.load(os.path.join(model_path, 'Y.npy'))
+            self.K = self.X.shape[1]
 
     def _run_single_step(self, Y, X, C, R, p_float):
-
-        assert self.mode == 'train', "cannot call when mode is not train"
 
         lamb = self.lamb
         Y2 = np.tensordot(Y.T, Y, axes=1)
@@ -69,8 +68,6 @@ class ALS:
 
     def _run_single_step_naive(self, Y, X, _R, p_float):
 
-        assert self.mode == 'train', "cannot call when mode is not train"
-
         lamb = self.lamb
         Lamb = lamb * np.eye(self.K)
         alpha = self.alpha
@@ -93,8 +90,6 @@ class ALS:
 
     def _calc_loss(self, Y, X, _C, _R, _p):
 
-        assert self.mode == 'train', "cannot call when mode is not train"
-
         lamb = self.lamb
         p = _p.copy().toarray()
         R = _R.copy().toarray()
@@ -102,6 +97,10 @@ class ALS:
         loss = np.sum(np.multiply(C, np.square(p - np.matmul(X, Y.T))))
         loss += lamb*(np.mean(np.linalg.norm(X, 2, axis=1)) + np.mean(np.linalg.norm(Y, 2, axis=1)))
         return loss
+
+    def train_update(self, U, users, cb:Callback=None):
+        # TODO: don't worry my love, I'll come back for you
+        raise NotImplementedError
 
     def train(self, U, cb:Callback=None):
         steps = self.steps
@@ -228,7 +227,7 @@ class ALSTF(ALS):
         lamb = self.lamb
         alpha = self.alpha
 
-        assert self.mode == 'train', "cannot call when mode is not train"
+        # assert self.mode == 'train', "cannot call when mode is not train"
 
         if users is None: users = np.arange(0,N)
         if self.Y2Tensor is None or not use_cache:
@@ -316,8 +315,8 @@ class ALSTF(ALS):
         assert model_path is not None, "model path not specified"
         if not os.path.exists(model_path):
             os.mkdir(model_path)
-        np.save(os.path.join(model_path, "X.npy"), self.X[:-1])
-        np.save(os.path.join(model_path, "Y.npy"), self.Y[:-1])
+        np.save(os.path.join(model_path, "X.npy"), self.X)
+        np.save(os.path.join(model_path, "Y.npy"), self.Y)
 
     def save_as_epoch(self, epoch:Union[str, int]='best'):
         model_name = 'epoch-{:03d}' if type(epoch)==int else 'epoch-{:s}'
