@@ -18,7 +18,7 @@ class RecommenderALS(Recommender):
                  , n_users=None, n_items=None
                  , als_kwargs=None
                  # arguments for predict mode
-                 , model_path=None):
+                 , model_path=None, saved_model=None):
 
         super(RecommenderALS, self).__init__(model_path)
 
@@ -49,7 +49,8 @@ class RecommenderALS(Recommender):
             self.data = None
             self.input_format = None
             self.als = ALSTF(
-                batchsize=300, mode=mode, model_path=os.path.join(model_path, 'epoch-best'),
+                batchsize=300, mode=mode, model_path=model_path,
+                saved_model=os.path.join(model_path, 'epoch-best') if saved_model is None else saved_model,
                 N=self.config['n_users'], M=self.config['n_items'], **self.config['als_kwargs'])
             # self.als = ALS(mode='predict', model_path=model_path, N=n_users, M=n_items)
 
@@ -63,14 +64,16 @@ class RecommenderALS(Recommender):
 
     def train(self):
         assert self.mode is 'train', "must be in train mode!"
+        auc_path = os.path.join(self.model_file, 'AUC.csv')
+        ckpt_json_path = os.path.join(self.model_file, 'ALS_checkpoint.json')
         AUCC = AUCCallback(
-            self.data, np.arange(0,self.data.N,self.data.N//300,dtype=int),
+            self.data, auc_path, np.arange(0,self.data.N,self.data.N//300,dtype=int),
             save_fn=lambda: self.als.save_as_epoch('best')
         )
         AUCC.set_model(self)
         Utrain, _ = self.data.make_training_datasets(dtype='sparse')
-        trace = self.als.train(Utrain, cb=AUCC)
-        AUCC.save_result(os.path.join(self.model_file, 'AUC.csv'))
+        trace = self.als.train(Utrain, cb=AUCC, ckpt_json=ckpt_json_path)
+        AUCC.save_result(auc_path)
         return trace, AUCC.AUCe
 
     def train_update(self, users: Optional[Iterable[int]]=None):

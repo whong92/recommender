@@ -7,6 +7,7 @@ from recommender.utils.utils import get_pos_ratings
 from keras.utils import generic_utils
 import tensorflow as tf
 from typing import Callable, Any, Union, Iterable
+import os
 
 def compute_auc(rec, test_user, train_user):
 
@@ -84,23 +85,31 @@ def eval_model(model: Recommender, data: ExplicitDataFromCSV, batchsize:int=10, 
 
 class AUCCallback(Callback):
 
-    def __init__(self, data: ExplicitDataFromCSV, M:Union[int, Iterable[int]]=100, batchsize:int=10, save_fn:Callable=None):
+    def __init__(self, data: ExplicitDataFromCSV, outfile:str, M:Union[int, Iterable[int]]=100, batchsize:int=10, save_fn:Callable=None):
         super(AUCCallback, self).__init__()
         self.data = data
         self.M = M
         self.batchsize=batchsize
         self.save_fn = save_fn
-        self.best_AUC = 0.
-        self.AUCe = []
-        self.epochs = []
+        self.outfile = outfile
+        if os.path.exists(outfile):
+            df = pd.read_csv(outfile)
+            self.AUCe = np.array(df['AUC'])
+            self.epochs = np.array(df['epoch'])
+            self.best_AUC = np.max(self.AUCe)
+        else:
+            self.best_AUC = 0.
+            self.AUCe = np.array([])
+            self.epochs = np.array([])
 
     def on_epoch_end(self, epoch, logs=None):
         AUC = eval_model(self.model, self.data, M=self.M, batchsize=self.batchsize)
-        self.AUCe.append(np.mean(AUC[AUC>-1]))
-        self.epochs.append(epoch)
+        self.AUCe = np.append(self.AUCe, np.mean(AUC[AUC>-1]))
+        self.epochs = np.append(self.epochs, epoch)
         if self.AUCe[-1] >= self.best_AUC and self.save_fn is not None:
             self.save_fn()
             self.best_AUC = self.AUCe[-1]
+        self.save_result(self.outfile)
 
     def save_result(self, outfile):
         pd.DataFrame({'epoch': self.epochs, 'AUC': self.AUCe}).to_csv(outfile, index=False)

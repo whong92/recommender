@@ -19,7 +19,7 @@ class RecommenderLMF(Recommender):
                  , n_users=None, n_items=None
                  , lmf_kwargs=None
                  # arguments for predict mode
-                 , model_path=None):
+                 , model_path=None, saved_model=None):
 
         super(RecommenderLMF, self).__init__(model_path)
 
@@ -49,7 +49,8 @@ class RecommenderLMF(Recommender):
             self.data = None
             self.input_format = None
             self.lmf = LogisticMatrixFactorizer(
-                batchsize=300, mode=mode, model_path=os.path.join(model_path, "model-best.h5"),
+                batchsize=300, mode=mode, model_path=model_path,
+                saved_model=os.path.join(model_path, 'model-best.h5') if saved_model is None else saved_model,
                 N=self.config['n_users'], M=self.config['n_items'], **self.config['lmf_kwargs']
             )
 
@@ -65,16 +66,17 @@ class RecommenderLMF(Recommender):
 
         Utrain, Utest = self.data.make_training_datasets(dtype='sparse')
         U = Utrain + Utest
-
+        auc_path = os.path.join(self.model_file, 'AUC.csv')
+        ckpt_json_path = os.path.join(self.model_file, 'LMF_checkpoint.json')
         AUCC = AUCCallback(
-            self.data, np.arange(0,self.data.N,self.data.N//300,dtype=int),
+            self.data, auc_path, np.arange(0,self.data.N,self.data.N//300,dtype=int),
             save_fn=lambda: self.lmf.save_as_epoch('best')
         )
         AUCC.set_model(self)
         LMFC = LMFCallback(Utrain, Utest, U, self.config['n_users'], self.config['n_items'])
         LMFC.set_model(self.lmf)
-        trace = self.lmf.fit(Utrain, Utest, U, cb=[LMFC, AUCC], users=users)
-        AUCC.save_result(os.path.join(self.model_file, 'AUC.csv'))
+        trace = self.lmf.fit(Utrain, Utest, U, cb=[LMFC, AUCC], users=users, ckpt_json=ckpt_json_path)
+        AUCC.save_result(auc_path)
         LMFC.save_result(os.path.join(self.model_file, 'LMFC.csv'))
         return trace
 

@@ -9,13 +9,13 @@ from tqdm import tqdm
 import os
 from keras.callbacks import Callback
 from typing import Union, Optional
-
+import json
 
 class ALS:
 
     def __init__(
             self, mode='train', N=100, M=100, K=10, lamb=1e-06, alpha=40., steps=10, model_path=None,
-            Xinit=None, Yinit=None
+            Xinit=None, Yinit=None, saved_model=None
     ):
         self.R = None #U # utility |user|x|items|, sparse, row major
         self.mode = mode
@@ -25,7 +25,7 @@ class ALS:
         self.steps = steps
         self.lamb = lamb
         self.alpha = alpha
-        if mode == 'train':
+        if saved_model is None:
             self.K = K
             # dense feature matrices
             if Xinit is not None:
@@ -39,10 +39,7 @@ class ALS:
                 np.random.seed(42)
                 self.Y = np.random.normal(0, 1/np.sqrt(self.K), size=(M, self.K))
         else:
-            assert model_path is not None, "model path required in predict mode"
-            self.X = np.load(os.path.join(model_path, 'X.npy'))
-            self.Y = np.load(os.path.join(model_path, 'Y.npy'))
-            self.K = self.X.shape[1]
+            self.load_model(saved_model)
 
     def _run_single_step(self, Y, X, C, R, p_float):
 
@@ -102,7 +99,7 @@ class ALS:
         # TODO: don't worry my love, I'll come back for you
         raise NotImplementedError
 
-    def train(self, U, cb:Callback=None):
+    def train(self, U, cb:Callback=None, ckpt_json:Optional[str]=None,):
         steps = self.steps
         assert self.mode == 'train', "cannot call when mode is not train"
         R = U
@@ -110,9 +107,12 @@ class ALS:
         C = R.copy()
         C.data = 1 + self.alpha*C.data
 
-        trace = np.zeros(shape=(steps,))
+        trace = None
+        start = -1
+        if ckpt_json is not None: start, trace = self.load_ckpt_json(ckpt_json=ckpt_json)
+        if trace is None: trace = np.zeros(shape=(steps,))
 
-        for i in tqdm(range(steps)):
+        for i in tqdm(range(start+1,steps)):
 
             Xp = self._run_single_step(self.Y, self.X, C, R, p)
             trace[i] = np.mean(np.abs(self.X - Xp))
@@ -121,7 +121,7 @@ class ALS:
             trace[i] += np.mean(np.abs(self.Y - Yp))
             self.Y = Yp
 
-            self.save_as_epoch(i)
+            if ckpt_json is not None: self.save_ckpt(ckpt_json, i, trace)
 
         return trace
 
@@ -137,8 +137,40 @@ class ALS:
 
     def save_as_epoch(self, epoch:Union[str, int]='best'):
         model_name = 'epoch-{:03d}' if type(epoch)==int else 'epoch-{:s}'
-        self.save(os.path.join(self.model_path, model_name.format(epoch)))
+        save_path = os.path.join(self.model_path, model_name.format(epoch))
+        self.save(save_path)
+        return save_path
 
+    def load_model(self, model_path):
+        self.X = np.load(os.path.join(model_path, 'X.npy'))
+        self.Y = np.load(os.path.join(model_path, 'Y.npy'))
+        self.K = self.X.shape[1]
+
+    def load_trace(self, trace_path):
+        return np.array(pd.read_csv(trace_path)['trace'])
+
+    def save_trace(self, trace):
+        save_path = os.path.join(self.model_path, 'trace.csv')
+        pd.DataFrame({
+            'epoch': list(range(len(trace))), 'trace': trace,
+        }).to_csv(save_path, index=False)
+        return save_path
+
+    def load_ckpt_json(self, ckpt_json):
+        if not os.path.exists(ckpt_json): return -1, None
+        with open(ckpt_json, 'r') as fp:
+            ckpt = json.load(fp)
+
+        assert 'model_path' in ckpt and 'epoch' in ckpt and 'trace_path' in ckpt, "model_path, epoch, and trace_path required in ckpt. found {}".format(ckpt.keys())
+        self.load_model(ckpt['model_path'])
+        trace = self.load_trace(ckpt['trace_path'])
+        return ckpt['epoch'], trace
+
+    def save_ckpt(self, ckpt_json, epoch, trace):
+        model_path = self.save_as_epoch(epoch)
+        trace_path = self.save_trace(trace)
+        with open(ckpt_json, 'w') as fp:
+            json.dump({'model_path': model_path, 'trace_path': trace_path, 'epoch': epoch}, fp, indent=4)
 
 def get_and_pad_ratings(R, users, M, batchsize=None):
     ru = R[users, :]
@@ -267,7 +299,7 @@ class ALSTF(ALS):
 
         return diff / tf.cast(N, dtype=tf.float64)
 
-    def train(self, U, cb:Callback=None):
+    def train(self, U, cb:Callback=None, ckpt_json=None):
 
         assert self.mode == 'train', "cannot call when mode is not train"
 
@@ -275,6 +307,11 @@ class ALSTF(ALS):
         M = self.M
         N = self.N
         steps = self.steps
+
+        trace = None
+        start = -1
+        if ckpt_json is not None: start, trace = self.load_ckpt_json(ckpt_json=ckpt_json)
+        if trace is None: trace = np.zeros(shape=(steps,))
 
         # padding for reasons
         X = tf.Variable(name="X", dtype=tf.float64, initial_value=np.append(self.X, np.zeros(shape=(1,self.K)), axis=0))
@@ -284,9 +321,8 @@ class ALSTF(ALS):
         X[N].assign(tf.zeros([k], dtype=tf.float64))
 
         UT = sps.csr_matrix(U.T)
-        trace = np.zeros(shape=(steps,))
 
-        for i in range(steps):
+        for i in range(start+1, steps):
             print("step {}/{}".format(i, steps-1))
             dX = self._run_single_step(Y, X, U, prefix="X")
             dY = self._run_single_step(X, Y, UT, prefix="Y")
@@ -295,7 +331,7 @@ class ALSTF(ALS):
 
             self.X = X.numpy()[:-1] # remove padded dimension
             self.Y = Y.numpy()[:-1]
-            self.save_as_epoch(i)
+            if ckpt_json is not None: self.save_ckpt(ckpt_json, i, trace)
             if cb:
                 cb.on_epoch_end(i)
 
@@ -307,21 +343,6 @@ class ALSTF(ALS):
         }).to_csv(os.path.join(self.model_path, 'trace.csv'), index=False)
 
         return trace
-
-    def save(self, model_path=None):
-
-        if model_path is None:
-            model_path = self.model_path
-        assert model_path is not None, "model path not specified"
-        if not os.path.exists(model_path):
-            os.mkdir(model_path)
-        np.save(os.path.join(model_path, "X.npy"), self.X)
-        np.save(os.path.join(model_path, "Y.npy"), self.Y)
-
-    def save_as_epoch(self, epoch:Union[str, int]='best'):
-        model_name = 'epoch-{:03d}' if type(epoch)==int else 'epoch-{:s}'
-        self.save(os.path.join(self.model_path, model_name.format(epoch)))
-
 
 @tf.function
 def run_single_step(

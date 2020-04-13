@@ -16,6 +16,7 @@ from keras.callbacks import Callback
 import pandas as pd
 from typing import Optional, Set, Iterable
 from recommender.utils.utils import get_pos_ratings, get_neg_ratings
+import json
 
 class LMFCallback(Callback):
     def __init__(self, Utrain: sps.csr_matrix, Utest: sps.csr_matrix, U: sps.csr_matrix, N: int, M: int, users: Optional[Iterable[int]]=None):
@@ -67,23 +68,23 @@ class LMFCallback(Callback):
 
 class LogisticMatrixFactorizer(object):
 
-    def __init__(self, model_path, N, M, f=10, lr=0.01, lamb=0.01, alpha=40.0, bias=False, epochs=30, batchsize=5000, mode='train'):
+    def __init__(self, model_path, N, M, f=10, lr=0.01, lamb=0.01, alpha=40.0, bias=False, epochs=30, batchsize=5000, mode='train', saved_model=None):
         self.mode = mode
-        self.initialize(model_path, N, M, f, lr, lamb, alpha=alpha, bias=bias, epochs=epochs, batchsize=batchsize)
+        self.initialize(model_path, N, M, f, lr, lamb, alpha=alpha, bias=bias, epochs=epochs, batchsize=batchsize, saved_model=saved_model)
 
     @staticmethod
     def make_model(N, M, f=10, lamb=0.01, bias=False):
 
-        u_in = Input(shape=(1,), dtype='int32', name='u_in')
-        i_in = Input(shape=(1,), dtype='int32', name='i_in')
+        u_in = tf.keras.layers.Input(shape=(1,), dtype='int32', name='u_in')
+        i_in = tf.keras.layers.Input(shape=(1,), dtype='int32', name='i_in')
 
 
-        X = Embedding(N, f, dtype='float32',
-                      embeddings_regularizer=regularizers.l2(lamb), input_length=1,
-                      embeddings_initializer=initializers.RandomNormal(seed=42), name='P')
-        Y = Embedding(M, f, dtype='float32',
-                      embeddings_regularizer=regularizers.l2(lamb), input_length=1,
-                      embeddings_initializer=initializers.RandomNormal(seed=42), name='Q')
+        X = tf.keras.layers.Embedding(N, f, dtype='float32',
+                      embeddings_regularizer=tf.keras.regularizers.l2(lamb), input_length=1,
+                      embeddings_initializer=tf.keras.initializers.RandomNormal(seed=42), name='P')
+        Y = tf.keras.layers.Embedding(M, f, dtype='float32',
+                      embeddings_regularizer=tf.keras.regularizers.l2(lamb), input_length=1,
+                      embeddings_initializer=tf.keras.initializers.RandomNormal(seed=42), name='Q')
 
         x = X(u_in)
         y = Y(i_in)
@@ -91,23 +92,23 @@ class LogisticMatrixFactorizer(object):
         if bias:
             # currently does not work with tf.function: https://github.com/keras-team/keras/issues /13671
             # seems like Multiply() and Add() have problems? TODO: try to recreate!
-            Bu = Embedding(N, 1, dtype='float32', embeddings_initializer='random_normal', name='Bu')
-            Bi = Embedding(M, 1, dtype='float32', embeddings_initializer='random_normal', name='Bi')
+            Bu = tf.keras.layers.Embedding(N, 1, dtype='float32', embeddings_initializer='random_normal', name='Bu')
+            Bi = tf.keras.layers.Embedding(M, 1, dtype='float32', embeddings_initializer='random_normal', name='Bi')
             bp = Bu(u_in)
             bq = Bi(i_in)
-            z = Dot(2)([x, y])
+            z = tf.keras.layers.Dot(2)([x, y])
             # Add(name='rhat')([Flatten()(Dot(2)([x, y])), bp, bq])
             # Need to do this because the add layer doesn't work in tf function
-            rhat = Flatten(name='rhat')(Lambda(lambda x: x[0] + x[1] + x[2])([z, bp, bq]))
-            phat = Activation('sigmoid', name='phat')(rhat)
+            rhat = tf.keras.layers.Flatten(name='rhat')(tf.keras.layers.Lambda(lambda x: x[0] + x[1] + x[2])([z, bp, bq]))
+            phat = tf.keras.layers.Activation('sigmoid', name='phat')(rhat)
         else:
-            rhat = Flatten(name='rhat')(Dot(2)([x, y]))
-            phat = Activation('sigmoid', name='phat')(rhat)
+            rhat = tf.keras.layers.Flatten(name='rhat')(tf.keras.layers.Dot(2)([x, y]))
+            phat = tf.keras.layers.Activation('sigmoid', name='phat')(rhat)
 
-        model = Model(inputs=[u_in, i_in], outputs=[phat, rhat, x, y])
+        model = tf.keras.Model(inputs=[u_in, i_in], outputs=[phat, rhat, x, y])
 
         model.compile(
-            optimizers.Adam(0.1), loss={'phat': 'mean_squared_error'}, metrics={'phat': 'mean_squared_error'}
+            tf.keras.optimizers.Adam(0.1), loss={'phat': 'mean_squared_error'}, metrics={'phat': 'mean_squared_error'}
         )
         return model
 
@@ -123,9 +124,10 @@ class LogisticMatrixFactorizer(object):
         return vars
 
     def initialize(
-            self, model_path, N, M, f=10, lr=0.01, lamb=0.01, alpha=40.0, epochs=30, batchsize=5000, bias=False,
+            self, model_path, N, M, f=10, lr=0.01, lamb=0.01, alpha=40.0, epochs=30, batchsize=5000, bias=False, saved_model=None
     ):
 
+        self.saved_model = saved_model
         self.model_path = model_path
         self.epochs = epochs
         self.batchsize = batchsize
@@ -133,10 +135,8 @@ class LogisticMatrixFactorizer(object):
 
         self.model_kwargs = {'N':N, 'M':M, 'f':f, 'lamb': lamb, 'bias':bias}
 
-        if self.mode == 'predict':
-            self.model = load_model(self.model_path, compile=True)
-        else:
-            self.model = LogisticMatrixFactorizer.make_model(**self.model_kwargs)
+        if saved_model is not None: self.model = tf.keras.models.load_model(self.saved_model, compile=True)
+        else: self.model = LogisticMatrixFactorizer.make_model(**self.model_kwargs)
 
         loss_fn = PLMFLoss(alpha=alpha)
         self.loss_fn = loss_fn
@@ -162,7 +162,7 @@ class LogisticMatrixFactorizer(object):
         self.model.summary()
 
     def fit(self, Utrain, Utest, U, users:Optional[np.array]=None, cb: Union[Callback, List[Callback]]=None,
-            exclude_phase:Optional[Set]=None): #, u_train, i_train, r_train, u_test, i_test, r_test):
+            exclude_phase:Optional[Set]=None, ckpt_json:Optional[str]=True): #, u_train, i_train, r_train, u_test, i_test, r_test):
 
         model = self.model
         X = self.vars['X']
@@ -175,16 +175,20 @@ class LogisticMatrixFactorizer(object):
 
         N = X.input_dim
         M = Y.input_dim
-        trace = np.zeros(shape=(epochs))
 
         if cb is not None and type(cb)==Callback: cb = [cb]
         if users is None: users = np.arange(0, N)
 
-        num_seen = tf.Variable(shape=(), initial_value=0., dtype='float32')
-        cur_batchsize = tf.Variable(shape=(), initial_value=0., dtype='float32')
-        acc_loss = tf.Variable(shape=(), initial_value=0.)
+        num_seen = tf.Variable(initial_value=0., dtype='float32')
+        cur_batchsize = tf.Variable(initial_value=0., dtype='float32')
+        acc_loss = tf.Variable(initial_value=0.)
 
-        opt = tf.keras.optimizers.Adam(self.lr, clipnorm=10.)
+        opt = tf.keras.optimizers.Adam(0.1)
+        trace = None
+        start_epoch = -1
+        tf_manager = None
+        if ckpt_json is not None: start_epoch, trace, tf_ckpt, tf_manager = self.load_ckpt_json(ckpt_json, opt, model)
+        if trace is None: trace = np.zeros(shape=(epochs))
 
         phaseVariables = {
             'X': {'vars': [X,Bu], 'acc_grads': [], 'train_step_fn': None},
@@ -208,7 +212,7 @@ class LogisticMatrixFactorizer(object):
         if cb is not None:
             for c in cb: c.on_epoch_end(-1)
 
-        for epoch in range(epochs):
+        for epoch in range(start_epoch+1,epochs):
 
             for phase in ['X', 'Y']:
 
@@ -248,18 +252,60 @@ class LogisticMatrixFactorizer(object):
 
             if cb is not None:
                 for c in cb: c.on_epoch_end(epoch)
-
-            self.save_as_epoch(epoch)
+            if ckpt_json is not None: self.save_ckpt(ckpt_json, epoch, trace, tf_manager)
 
         return trace
 
     def save(self, model_path):
-        self.model.save(model_path)
+        tf.keras.models.save_model(self.model, model_path, include_optimizer=True)
 
     def save_as_epoch(self, epoch:Union[str,int]='last'):
         model_name = 'model-{:03d}.h5' if type(epoch) == int else 'model-{:s}.h5'
-        save_dir = self.model_path if os.path.isdir(self.model_path) else os.path.dirname(self.model_path)
-        self.model.save(os.path.join(save_dir, model_name.format(epoch)))
+        save_path = os.path.join(self.model_path, model_name.format(epoch))
+        self.save(save_path)
+        return
+
+    def save_trace(self, trace):
+        save_path = os.path.join(self.model_path, 'trace.csv')
+        pd.DataFrame({
+            'epoch': list(range(len(trace))), 'trace': trace,
+        }).to_csv(save_path, index=False)
+        return save_path
+
+    def load_trace(self, trace_path):
+        return np.array(pd.read_csv(trace_path)['trace'])
+
+    def load_ckpt_json(self, ckpt_json, opt: tf.keras.optimizers.Optimizer, model: tf.keras.models.Model):
+
+        tf_ckpt_dir = os.path.join(self.model_path, 'tf_ckpts')
+        tf_ckpt_path = None
+        trace = None
+        start_epoch = -1
+
+        if os.path.exists(ckpt_json):
+            with open(ckpt_json, 'r') as fp: ckpt = json.load(fp)
+            assert 'epoch' in ckpt and 'trace_path' in ckpt, "model_path, epoch, and trace_path required in ckpt. found {}".format(
+                ckpt.keys())
+            trace = self.load_trace(ckpt['trace_path'])
+            start_epoch = ckpt['epoch']
+            tf_ckpt_path = ckpt['tf_ckpt_path']
+            tf_ckpt_dir = os.path.dirname(tf_ckpt_path)
+
+        tf_ckpt = tf.train.Checkpoint(optimizer=opt, model=model)
+        tf_manager = tf.train.CheckpointManager(tf_ckpt, tf_ckpt_dir, max_to_keep=3)
+        if tf_ckpt_path is None: tf_ckpt_path = tf_manager.latest_checkpoint
+        tf_ckpt.restore(tf_ckpt_path)
+        if tf_ckpt_path: print("Restored from {}".format(tf_manager.latest_checkpoint))
+        else: print("Initializing from scratch.")
+
+        return start_epoch, trace, tf_ckpt, tf_manager
+
+    def save_ckpt(self, ckpt_json, epoch, trace, tf_manager: tf.train.CheckpointManager):
+        model_path = self.save_as_epoch(epoch)
+        trace_path = self.save_trace(trace)
+        tf_ckpt_path = tf_manager.save()
+        with open(ckpt_json, 'w') as fp:
+            json.dump({'model_path': model_path, 'trace_path': trace_path, 'epoch': epoch, 'tf_ckpt_path': tf_ckpt_path}, fp, indent=4)
 
     def predict(self, u, i):
         return self.model.predict({'u_in': u, 'i_in': i}, batch_size=50000)
@@ -280,7 +326,7 @@ class PLMFLoss(keras.losses.Loss):
 
 # @tf.function(experimental_relax_shapes=True)
 def train_step(
-        model: Model, x: tf.Tensor, y: tf.Tensor, z: tf.Tensor,
+        model: tf.keras.models.Model, x: tf.Tensor, y: tf.Tensor, z: tf.Tensor,
         loss_fn: PLMFLoss, acc_grads: List[tf.Tensor], acc_loss: tf.Tensor, N: tf.Tensor, M: tf.Tensor):
 
     print("tracing tf function graph...")
