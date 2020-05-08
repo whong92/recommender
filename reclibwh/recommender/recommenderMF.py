@@ -4,8 +4,8 @@ import os
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
 
-from recommender.core.MatrixFactor import MatrixFactorizer
-from recommender.utils.ItemMetadata import ExplicitDataFromCSV
+from reclibwh.core.MatrixFactor import MatrixFactorizer
+from reclibwh.utils.ItemMetadata import ExplicitDataFromCSV
 from .recommenderInterface import Recommender
 from typing import Optional, Iterable
 

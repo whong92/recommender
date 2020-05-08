@@ -14,8 +14,8 @@ if gpus:
     # Memory growth must be set before GPUs have been initialized
     print(e)
 
-from recommender.utils.ItemMetadata import ExplicitDataFromCSV
-from recommender.recommender.recommenderALS import RecommenderALS
+from reclibwh.utils.ItemMetadata import ExplicitDataFromCSV
+from reclibwh.recommender.recommenderALS import RecommenderALS
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -24,8 +24,10 @@ import os
 
 if __name__=="__main__":
 
-    data_folder = 'D:\\PycharmProjects\\recommender\\data\\ml-latest-small'
-    model_folder = 'D:\\PycharmProjects\\recommender\\models'
+    # data_folder = 'D:\\PycharmProjects\\recommender\\data\\ml-latest-small'
+    # model_folder = 'D:\\PycharmProjects\\recommender\\models'
+    data_folder = '/home/ong/personal/recommender/data/ml-latest-small-2'
+    model_folder = '/home/ong/personal/recommender/models'
 
     d = ExplicitDataFromCSV(True, data_folder=data_folder)
 
@@ -33,18 +35,17 @@ if __name__=="__main__":
     users_remove = np.arange(0, d.N, d.N//10)
 
     train_ratings_holdout = d.pop_user_ratings(users_remove)
-
+    
     # train with rating removed
     save_path = os.path.join(model_folder, "ALS_{:s}".format(datetime.now().strftime("%Y-%m-%d.%H-%M-%S")))
     if not os.path.exists(save_path):
         os.mkdir(save_path)
-
+    
     rals = RecommenderALS(mode='train', n_users=d.N, n_items=d.M,
                         als_kwargs={'K':20, 'lamb':1e-06, 'alpha':40., 'steps': 5},
                         model_path=save_path
                         )
 
-    # array input format - onnly for smaller datasets
     rals.input_data(d)
     trace = rals.train()
     # plt.plot(trace)
@@ -57,13 +58,11 @@ if __name__=="__main__":
     # update model with removed ratings, something like this
     d.add_user_ratings(train_ratings_holdout['user'], train_ratings_holdout['item'], train_ratings_holdout['rating'])
     trace, auc = rals.train_update(users=users_remove)
-    print(trace, auc)
 
-    # add a user, add phony ratings
     d.add_user()
     new_ratings_train = train_ratings_holdout.loc[0].copy()
     new_ratings_train['user'] = d.N - 1
-    new_ratings_test = d.get_user_ratings(0, train=False).copy()
+    new_ratings_test = d.get_user_ratings([0], train=False).copy()
     new_ratings_test['user'] = d.N - 1
     d.add_user_ratings(new_ratings_train['user'], new_ratings_train['item'], new_ratings_train['rating'], train=True)
     d.add_user_ratings(new_ratings_test['user'], new_ratings_test['item'], new_ratings_test['rating'], train=False)

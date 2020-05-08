@@ -55,60 +55,6 @@ def getCatMap(chunks):
         tot_len += len(chunk)
     return user_map, item_map, tot_len
 
-def getChunk(file, item, user, rating, chunksize=1000):
-    dfReader = pd.read_csv(file, usecols=[item,user,rating], iterator=True, chunksize=chunksize)
-    for chunk in dfReader:
-        chunk.rename(columns={
-            item: 'item',
-            user: 'user',
-            rating: 'rating',
-        }, inplace=True)
-        yield chunk
-
-def procChunk(chunk, user_map_df, item_map_df):
-    chunk = chunk.merge(user_map_df, left_on='user', right_index=True)
-    chunk = chunk.merge(item_map_df, left_on='item', right_index=True)
-    chunk['user'] = chunk['user_cat']
-    chunk['item'] = chunk['item_cat']
-    return chunk
-
-def procSingleRow(row, user_map, item_map):
-    row['user'] = user_map[int(row.iloc[0]['user'])]
-    row['item'] = item_map[int(row.iloc[0]['item'])]
-    return row
-
-def tf_serialize_example(user, item, rating):
-    tf_string = tf.py_func(
-        serializeExample,
-        (user,item,rating),
-        tf.string
-    )
-    return tf.reshape(tf_string, ())
-
-def serializeExample(user, item, rating):
-    feature = {
-        'user': tf.train.Feature(int64_list=tf.train.Int64List(value=[user])),
-        'item': tf.train.Feature(int64_list=tf.train.Int64List(value=[item])),
-        'rating': tf.train.Feature(float_list=tf.train.FloatList(value=[rating])),
-    }
-    return tf.train.Example(features=tf.train.Features(feature=feature)).SerializeToString()
-
-def df2umCSR(df, M=None, N=None):
-    data = np.array(df['rating'])
-    row = np.array(df['item']).astype(int)
-    col = np.array(df['user']).astype(int)
-
-    if M is None:
-        M = np.unique(row).shape[0]
-    if N is None:
-        N = np.unique(col).shape[0]
-
-    umCSR = sps.csr_matrix(
-        (data, (row, col)),
-        shape=(M, N)
-    )
-    return umCSR
-
 def rmse(x, y):
     return np.sqrt(np.mean(np.power(x-y, 2)))
 
@@ -124,12 +70,14 @@ def mean_nnz(M, axis=None, mu=0):
     m[c>0] = np.divide(s[c>0],c[c>0])
     return m
 
-def splitDf(df, train_test_split=0.8):
+def splitDf(df, train_test_split=0.8, return_df=False):
     assert train_test_split > 0
     perm = np.random.permutation(len(df))
-    train_df = df.iloc[perm[:int(len(df) * train_test_split)]]
-    test_df = df.iloc[perm[int(len(df) * train_test_split):]]
-    return train_df, test_df
+    train_split = perm[:int(len(df) * train_test_split)]
+    test_split = perm[int(len(df) * train_test_split):]
+    if return_df:
+        return df.iloc[train_split], df.iloc[test_split]
+    return train_split, test_split
 
 def sample_neg(pos:np.array, M:int, s:int):
     neg = np.zeros(shape=(0,), dtype=int)

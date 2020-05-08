@@ -1,7 +1,5 @@
 import numpy as np
 import pandas as pd
-import scipy.sparse as sps
-import matplotlib.pyplot as plt
 import tensorflow as tf
 from keras.utils import generic_utils
 from scipy import sparse as sps
@@ -221,7 +219,7 @@ class ALSTF(ALS):
         if self.XTensor is not None: # update cached tensor if exists
             self.XTensor = tf.Variable(
                 name="X", dtype=tf.float64,
-                initial_value=np.append(self.X, np.zeros(shape=(1, self.K)), axis=0)
+                initial_value=np.append(self.X, np.random.normal(0, 1 / np.sqrt(self.K), size=(1, self.K)), axis=0)
             )
         self.N += num
 

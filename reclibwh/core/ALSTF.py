@@ -3,7 +3,7 @@ import numpy as np
 import scipy.sparse as sps
 import tensorflow as tf
 
-from recommender.core.ALS import ALSTF, run_single_step, sparse2dataset
+from reclibwh.core.ALS import ALSTF, run_single_step, sparse2dataset
 from .ALS import ALS
 
 if __name__=="__main__":

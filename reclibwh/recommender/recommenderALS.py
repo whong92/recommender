@@ -5,8 +5,8 @@ import numpy as np
 import scipy.sparse as sps
 from sklearn.metrics.pairwise import cosine_similarity
 
-from recommender.core.ALS import ALSTF
-from recommender.utils.ItemMetadata import ExplicitDataFromCSV
+from reclibwh.core.ALS import ALSTF
+from reclibwh.utils.ItemMetadata import ExplicitDataFromCSV
 from .recommenderInterface import Recommender
 from ..utils.eval_utils import AUCCallback
 from typing import Iterable, Optional
@@ -54,6 +54,7 @@ class RecommenderALS(Recommender):
                 N=self.config['n_users'], M=self.config['n_items'], **self.config['als_kwargs'])
             # self.als = ALS(mode='predict', model_path=model_path, N=n_users, M=n_items)
 
+
     def input_data(self, data: ExplicitDataFromCSV):
         self.data = data
         # self.training_data, self.validation_data = data.make_training_datasets(dtype='sparse')
@@ -61,6 +62,7 @@ class RecommenderALS(Recommender):
 
     def add_users(self, num=1):
         self.als._add_users(num=num)
+        self.config['n_users'] += num
 
     def train(self):
         assert self.mode is 'train', "must be in train mode!"
@@ -77,14 +79,14 @@ class RecommenderALS(Recommender):
         return trace, AUCC.AUCe
 
     def train_update(self, users: Optional[Iterable[int]]=None):
-        if users is None:
-            users = np.arange(self.data.N)
-        AUCC = AUCCallback(self.data, users, save_fn=lambda: self.als.save_as_epoch('best_updated'))
+        if users is None: users = np.arange(self.data.N)
+        auc_path = os.path.join(self.model_file, 'AUC_update.csv')
+        AUCC = AUCCallback(self.data, auc_path, users, save_fn=lambda: self.als.save_as_epoch('best_updated'))
         AUCC.set_model(self)
         # TODO: improve so not required to construct the entire dataset for an update
-        Utrain, _ = self.data.make_training_datasets(dtype='sparse')
+        Utrain, _ = self.data.make_training_datasets(users=users, dtype='sparse')
         trace = self.als.train_update(Utrain, users, cb=AUCC, use_cache=True)
-        AUCC.save_result(os.path.join(self.model_file, 'AUC_update.csv'))
+        AUCC.save_result(auc_path)
         return trace, AUCC.AUCe
 
     def save(self, path):
@@ -114,12 +116,13 @@ class RecommenderALS(Recommender):
 
         return np.argsort(s)[::-1][1:], np.sort(s)[::-1][1:]
 
-    def recommend_similar_to(self, u_in, i_in):
+    def recommend_similar_to(self, u_in, i_in, lamb=0.5):
+        assert lamb >= 0. and lamb <= 1., "lamb needs to be normalized"
         X = self.als.X[u_in]
         y = self.als.Y[i_in]
         Y = self.als.Y
         s = np.squeeze(cosine_similarity(Y, np.expand_dims(y, axis=0)))
         p = np.matmul(X, np.transpose(Y))  # np.sum(np.multiply(X, Y), axis=1)
-        q = .5*(p + s)
+        q = lamb*p + (1-lamb)*s
 
         return np.argsort(q)[::-1], np.sort(q)[::-1]

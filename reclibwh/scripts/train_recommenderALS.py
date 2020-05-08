@@ -14,8 +14,8 @@ if gpus:
     # Memory growth must be set before GPUs have been initialized
     print(e)
 
-from recommender.utils.ItemMetadata import ExplicitDataFromCSV
-from recommender.recommender.recommenderALS import RecommenderALS
+from reclibwh.utils.ItemMetadata import ExplicitDataFromCSV
+from reclibwh.recommender.recommenderALS import RecommenderALS
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -24,13 +24,16 @@ import os
 
 if __name__=="__main__":
 
-    data_folder = 'D:\\PycharmProjects\\recommender\\data\\ml-latest-small'
-    model_folder = 'D:\\PycharmProjects\\recommender\\models'
+    # data_folder = 'D:\\PycharmProjects\\recommender\\data\\ml-latest-small'
+    # model_folder = 'D:\\PycharmProjects\\recommender\\models'
+    data_folder = '/home/ong/personal/recommender/data/ml-latest-small'
+    model_folder = '/home/ong/personal/recommender/models'
 
     d = ExplicitDataFromCSV(True, data_folder=data_folder)
     # d.save(data_folder)
 
-    save_path = os.path.join(model_folder, "ALS_{:s}".format(datetime.now().strftime("%Y-%m-%d.%H-%M-%S")))
+    # save_path = os.path.join(model_folder, "ALS_{:s}".format(datetime.now().strftime("%Y-%m-%d.%H-%M-%S")))
+    save_path = os.path.join(model_folder, "ALS_2020-04-13.19-32-15")#, 'ALS_2020-04-13.13-14-51')
     if not os.path.exists(save_path):
         os.mkdir(save_path)
 

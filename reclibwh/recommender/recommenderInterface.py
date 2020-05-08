@@ -1,4 +1,4 @@
-from recommender.utils.ItemMetadata import ExplicitData
+from reclibwh.utils.ItemMetadata import ExplicitData
 from typing import Iterable, Optional
 
 class Recommender:

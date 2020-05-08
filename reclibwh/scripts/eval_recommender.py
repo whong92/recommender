@@ -1,11 +1,9 @@
-from recommender.utils.eval_utils import compute_auc, compute_ap, eval_model
-from recommender.recommender.recommenderMF import RecommenderMF
-from recommender.recommender.recommenderALS import RecommenderALS
-#from recommender.recommender.recommenderCFSimple import RecommenderCFSimple
+from reclibwh.utils.eval_utils import compute_auc, compute_ap, eval_model
+from reclibwh.recommender.recommenderALS import RecommenderALS
 import os, shutil
 import numpy as np
 from tqdm import tqdm
-from recommender.utils.ItemMetadata import ExplicitDataFromCSV
+from reclibwh.utils.ItemMetadata import ExplicitDataFromCSV
 import pandas as pd
 import re
 

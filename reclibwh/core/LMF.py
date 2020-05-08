@@ -3,9 +3,6 @@ import os
 import scipy.sparse as sps
 import keras
 from keras.backend import log, mean, exp
-from keras.layers import Input, Embedding, Dot, Flatten, Add, Activation, Lambda
-from keras.models import Model, load_model
-from keras import regularizers, optimizers, initializers
 from keras.utils import generic_utils
 import tensorflow as tf
 from typing import List
@@ -15,7 +12,7 @@ from sklearn.metrics import average_precision_score
 from keras.callbacks import Callback
 import pandas as pd
 from typing import Optional, Set, Iterable
-from recommender.utils.utils import get_pos_ratings, get_neg_ratings
+from reclibwh.utils.utils import get_pos_ratings, get_neg_ratings
 import json
 
 class LMFCallback(Callback):
@@ -160,9 +157,31 @@ class LogisticMatrixFactorizer(object):
             new_model.get_layer('Bi').set_weights(self.model.get_layer('Bi').get_weights())
         self.model = new_model
         self.model.summary()
+    
+    def _reset_users(self, users:Optional[np.array]=None):
+        """
+        reset user variables to scratch values in order to prevent overfitting
+
+        Keyword Arguments:
+            users {Optional[np.array]} -- [description] (default: {None})
+        """
+
+        # user variables
+        X = self.vars['X']
+        Bu = self.vars.get('Bu')
+        if users is None: users = np.arange(0, N)
+        num = len(users)
+        Xval = X.get_weights()[0]
+        Xval[users] = np.random.normal(0, 1./self.model_kwargs['f'], size=(num, self.model_kwargs['f']))
+        X.set_weights([Xval])
+        if not Bu: return
+        Buval = Bu.get_weights()[0]
+        Buval[users] = np.random.normal(0, 1., size=(num, 1))
+        Bu.set_weights([Buval])
+
 
     def fit(self, Utrain, Utest, U, users:Optional[np.array]=None, cb: Union[Callback, List[Callback]]=None,
-            exclude_phase:Optional[Set]=None, ckpt_json:Optional[str]=True): #, u_train, i_train, r_train, u_test, i_test, r_test):
+            exclude_phase:Optional[Set]=None, ckpt_json:Optional[str]=None, epochs:Optional[int]=None): #, u_train, i_train, r_train, u_test, i_test, r_test):
 
         model = self.model
         X = self.vars['X']
@@ -170,7 +189,7 @@ class LogisticMatrixFactorizer(object):
         Bu = self.vars.get('Bu')
         Bi = self.vars.get('Bi')
         loss_fn = self.loss_fn
-        epochs = self.epochs
+        if not epochs: epochs = self.epochs
         batchsize=self.batchsize
 
         N = X.input_dim

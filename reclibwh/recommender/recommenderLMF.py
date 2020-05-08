@@ -2,11 +2,10 @@ import json
 import os
 
 import numpy as np
-import scipy.sparse as sps
 from sklearn.metrics.pairwise import cosine_similarity
 
-from recommender.core.LMF import LogisticMatrixFactorizer, LMFCallback
-from recommender.utils.ItemMetadata import ExplicitDataFromCSV
+from reclibwh.core.LMF import LogisticMatrixFactorizer, LMFCallback
+from reclibwh.utils.ItemMetadata import ExplicitDataFromCSV
 from .recommenderInterface import Recommender
 from ..utils.eval_utils import AUCCallback
 from typing import Iterable, Optional
@@ -84,16 +83,18 @@ class RecommenderLMF(Recommender):
         if users is None:
             users = np.arange(self.data.N)
 
+        # reset so as to not overfit
+        self.lmf._reset_users(users)
         # TODO: improve so not required to construct the entire dataset for an update
         Utrain, Utest = self.data.make_training_datasets(dtype='sparse')
         U = Utrain + Utest
-
-        AUCC = AUCCallback(self.data, users, save_fn=lambda: self.lmf.save_as_epoch('best_updated'), batchsize=100)
+        auc_path = os.path.join(self.model_file, 'AUC_update.csv')
+        AUCC = AUCCallback(self.data, auc_path, users, save_fn=lambda: self.lmf.save_as_epoch('best_updated'), batchsize=100)
         AUCC.set_model(self)
         LMFC = LMFCallback(Utrain, Utest, U, self.config['n_users'], self.config['n_items'], users=users)
         LMFC.set_model(self.lmf)
-        trace = self.lmf.fit(Utrain, Utest, U, users=users, cb=[LMFC, AUCC], exclude_phase={'Y'})
-        AUCC.save_result(os.path.join(self.model_file, 'AUC_update.csv'))
+        trace = self.lmf.fit(Utrain, Utest, U, users=users, cb=[LMFC, AUCC], exclude_phase={'Y'}, epochs=3)
+        AUCC.save_result(auc_path)
         LMFC.save_result(os.path.join(self.model_file, 'LMFC_update.csv'))
 
         return trace,  AUCC.AUCe

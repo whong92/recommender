@@ -1,5 +1,5 @@
 from .recommenderInterface import Recommender
-from ..utils.utils import csv2df, rmse, mean_nnz, splitDf, normalizeDf
+from ..utils.utils import rmse, mean_nnz
 from sklearn.metrics.pairwise import cosine_similarity
 import scipy.sparse as sps
 import numpy as np

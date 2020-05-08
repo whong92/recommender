@@ -2,8 +2,8 @@ import pandas as pd
 import numpy as np
 from keras.callbacks import Callback
 from .ItemMetadata import ExplicitDataFromCSV
-from recommender.recommender.recommenderInterface import Recommender
-from recommender.utils.utils import get_pos_ratings
+from reclibwh.recommender.recommenderInterface import Recommender
+from reclibwh.utils.utils import get_pos_ratings
 from keras.utils import generic_utils
 import tensorflow as tf
 from typing import Callable, Any, Union, Iterable
@@ -27,27 +27,6 @@ def compute_auc(rec, test_user, train_user):
 
     return 1 - fpr/p
 
-def compute_ap(model, user, test, train):
-
-    pos = set(test[test['user'] == user]['item'])
-    rec = model.recommend(user)[0]
-    df_test_excl = train.loc[train.user == user]
-    rec_filt = filter_train_rec(rec, df_test_excl)
-
-    p = len(pos)
-
-    if p == 0: # no positive examples to test against
-        return -1
-
-    tp = 0
-    ap = 0
-
-    for i, r in enumerate(rec_filt):
-        if r in pos:
-            tp += 1
-            ap += tp/(i+1)
-    return ap/p
-
 def filter_train_rec(rec, user_train):
     rec_filt = pd.DataFrame({'item': rec}, )
     rec_filt = pd.merge(rec_filt, user_train, on="item", how="outer", indicator=True)
@@ -67,19 +46,19 @@ def eval_model(model: Recommender, data: ExplicitDataFromCSV, batchsize:int=10, 
     AUC = -np.ones(shape=(len(M),))
     progbar = generic_utils.Progbar(len(M))
 
-    Utrain, Utest = data.make_training_datasets(dtype='sparse')
+    Utrain, Utest = data.make_training_datasets(dtype='sparse', users=M)
 
     for m in range(0,len(M),batchsize):
         t = min(len(M), m + batchsize)
         recs = model.recommend(M[m:t])[0]
         for i, rec in enumerate(recs):
-            _, df_train, _ = get_pos_ratings(Utrain, [m+i], data.M)
-            _, df_test, r_test = get_pos_ratings(Utest, [m + i], data.M)
+            _, df_train, _ = get_pos_ratings(Utrain, [M[m+i]], data.M)
+            _, df_test, r_test = get_pos_ratings(Utest, [M[m + i]], data.M)
             df_test_rel = df_test[r_test>3.0]
             auc = compute_auc(rec, df_test_rel, df_train)
-
+            if auc < 0: continue
             AUC[m+i] = auc
-        progbar.add(len(recs), values=[('AUC', np.mean(AUC[m:t]))])
+        progbar.add(len(recs), values=[('AUC', np.mean(AUC[m:t][AUC[m:t]>=0]))])
 
     return AUC
 
