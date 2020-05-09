@@ -62,8 +62,7 @@ class ExplicitDataFromSql3(ExplicitData):
         }
     
     
-    @property
-    def conn(self):
+    def get_conn(self):
         conn = sqlite3.connect(self.sql3_f)
         conn.row_factory = sqlite3.Row
         return conn
@@ -83,7 +82,7 @@ class ExplicitDataFromSql3(ExplicitData):
     def get_ratings(self):
         
         # TODO: add user rating to this
-        cur = self.conn.cursor()
+        cur = self.get_conn().cursor()
         
         rt  = self.conf['rating_table']
         it  = self.conf['item_table']
@@ -104,7 +103,8 @@ class ExplicitDataFromSql3(ExplicitData):
 
     def add_user_ratings(self, users, items, ratings, train=True):
 
-        cur = self.conn.cursor()
+        conn = self.get_conn()
+        cur = conn.cursor()
 
         rt  = self.conf['rating_table']
         it  = self.conf['item_table']
@@ -116,7 +116,7 @@ class ExplicitDataFromSql3(ExplicitData):
             'ON CONFLICT({rt_ifk}) DO UPDATE SET {rt_r}=excluded.{rt_r}'\
             .format(rt=rt, rt_u=rt_u, rt_ifk=rt_ifk, rt_r=rt_r)
         cur.executemany(insert_str, [(u,i,r) for (u,i,r) in zip(users, items, ratings)])
-        self.conn.commit()
+        conn.commit()
 
     def pop_user_ratings(self, users, train=True):
         raise NotImplementedError
@@ -126,7 +126,9 @@ class ExplicitDataFromSql3(ExplicitData):
         assert len(users) > 0
         if users is None: users = np.arange(self.N)
 
-        cur = self.conn.cursor()
+        conn = self.get_conn()
+
+        cur = conn.cursor()
         
         rt  = self.conf['rating_table']
         it  = self.conf['item_table']
@@ -149,7 +151,7 @@ class ExplicitDataFromSql3(ExplicitData):
         else:
             rows = cur.execute(cmd).fetchall()
         
-        self.conn.commit()
+        conn.commit()
         
         D = ExplicitDataFromSql3._sqlite_rows_2_dataframe(
             rows,
@@ -170,19 +172,21 @@ class ExplicitDataFromSql3(ExplicitData):
 
     @property
     def M(self):
-        cur = self.conn.cursor()
+        conn = self.get_conn()
+        cur = conn.cursor()
         it  = self.conf['item_table']        
         res = cur.execute('SELECT COUNT(*) FROM {it}'.format(it=it)).fetchall()
-        self.conn.commit()
+        conn.commit()
         return ExplicitDataFromSql3._sqlite_rows_2_dataframe(res, ['COUNT(*)']).iloc[0]['COUNT(*)']
 
     @property
     def N(self):
-        cur = self.conn.cursor()
+        conn = self.get_conn()
+        cur = conn.cursor()
         ut  = self.conf['user_table']  
         ut_id_col = self.conf['ut_id_col']
         res = cur.execute('SELECT MAX({ut_id_col}) FROM {ut}'.format(ut_id_col=ut_id_col, ut=ut)).fetchall()
-        self.conn.commit()
+        conn.commit()
         colname = 'MAX({ut_id_col})'.format(ut_id_col=ut_id_col)
         return ExplicitDataFromSql3._sqlite_rows_2_dataframe(res, [colname]).iloc[0][colname] + 1 + self.Noffset
     
@@ -192,7 +196,8 @@ class ExplicitDataFromSql3(ExplicitData):
         """
         assert 'item_ids' in kwargs, "required: item_ids"
         assert 'names' in kwargs, "required: names"
-        cur = self.conn.cursor()
+        conn = self.get_conn()
+        cur = conn.cursor()
 
         it  = self.conf['item_table']
         it_i  = self.conf['it_item_id_col']
@@ -201,7 +206,7 @@ class ExplicitDataFromSql3(ExplicitData):
         insert_str = 'INSERT INTO {it} ({it_i}, name, created_at) VALUES (?, ?, ?) '.format(it=it, it_i=it_i)
 
         cur.executemany(insert_str, [(idx, name, '2020-04-25 20:43:24.088110') for (idx, name) in zip(kwargs['item_ids'], kwargs['names'])])
-        self.conn.commit()
+        conn.commit()
 
 
 class ExplicitDataFromCSV(ExplicitData):
@@ -384,8 +389,8 @@ if __name__=="__main__":
     
     """
     # convert old dataset format to new
-    ratings_train_csv = "/home/ong/personal/recommender/data/ml-latest-small/ratings_train.csv"
-    ratings_test_csv = "/home/ong/personal/recommender/data/ml-latest-small/ratings_test.csv"
+    ratings_train_csv = "/home/ong/personal/recommender/data/ml-20m/ratings_train.csv"
+    ratings_test_csv = "/home/ong/personal/recommender/data/ml-20m/ratings_test.csv"
     df_train = pd.read_csv(ratings_train_csv, index_col=None)
     df_test = pd.read_csv(ratings_test_csv, index_col=None)
     ratings_all = pd.concat([df_train, df_test])
@@ -395,8 +400,8 @@ if __name__=="__main__":
             np.ones(shape=len(df_test,), dtype=int)
         ])
     })
-    ratings_all.reset_index(drop=True).to_csv('/home/ong/personal/recommender/data/ml-latest-small-2/ratings_sanitized.csv', index=False)
-    df_split.to_csv('/home/ong/personal/recommender/data/ml-latest-small-2/ratings_split.csv', index=False)
+    ratings_all.reset_index(drop=True).to_csv('/home/ong/personal/recommender/data/ml-20m-2/ratings_sanitized.csv', index=False)
+    df_split.to_csv('/home/ong/personal/recommender/data/ml-20m-2/ratings_split.csv', index=False)
     """
 
     # data_dir = "/home/ong/personal/recommender/data/ml-latest-small-2"
@@ -408,6 +413,7 @@ if __name__=="__main__":
     # print(Utest[0,:])
 
 
+    """
     d = ExplicitDataFromSql3(
         '/home/ong/personal/FiML/FiML/db.sqlite3',
         rt='backend_rating',
@@ -431,3 +437,4 @@ if __name__=="__main__":
     print(d.make_training_datasets(users=[617], dtype='sparse'))
 
     # d.add_user_ratings([1,2,3], [3,4,5], [5.0, 5.0, 5.0])
+    """

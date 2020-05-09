@@ -10,8 +10,10 @@ import numpy as np
 from flask import g
 from flask import Flask, request, app, Response, jsonify
 from flask_script import Manager, Server
+from flask_cors import CORS
 
 app = Flask(__name__)
+CORS(app)
 manager = Manager(app)
 
 class ValidationError(Exception):
@@ -80,15 +82,15 @@ def say_hello():
 @app.route('/user_recommend', methods=('POST',))
 def user_recommend():
     try:
-        rec = app.stuff['rec']
+        rC = app.stuff['rec']
         stuff = request.get_json()
         if 'users' not in stuff: raise ValidationError('list of users required')
         users = stuff['users']
-        users = [user+rec.N_offset for user in users]
-        result = rec.submit_recommend_job(users)
+        users = [user+rC.N_offset for user in users]
+        result = rC.submit_recommend_job(users)
         recs, dists = result.result()
         res = {
-            user: {'rec': list(map(lambda x: int(x), rec)), 'dist': list(map(lambda x: float(x), dist))} for user, rec, dist in zip(users, recs[:,:200], dists[:,:200])
+            user-rC.N_offset: {'rec': list(map(lambda x: int(x), rec)), 'dist': list(map(lambda x: float(x), dist))} for user, rec, dist in zip(users, recs[:,:200], dists[:,:200])
         }
         return jsonify(res)
     except ValidationError as e:
@@ -114,9 +116,9 @@ def user_update():
         return Response('fuck {}'.format(e), 400)
     
 
-data_folder = '/home/ong/personal/recommender/data/ml-latest-small-2'
+data_folder = '/home/ong/personal/recommender/data/ml-20m-2'
 model_folder = '/home/ong/personal/recommender/models'
-model_path = os.path.join(model_folder, 'ALS_2020-04-28.00-22-47')
+model_path = os.path.join(model_folder, 'ALS_2020-04-13.14-16-33')
 
 class CustomServer(Server):
     def __call__(self, app, *args, **kwargs):

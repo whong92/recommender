@@ -2,12 +2,16 @@ from reclibwh.utils.ItemMetadata import ExplicitDataFromCSV, ExplicitDataFromSql
 
 if __name__=="__main__":
     
-    data_folder = '/home/ong/personal/recommender/data/ml-latest-small-2'
+    data_folder = '/home/ong/personal/recommender/data/ml-20m-2'
 
     dcsv = ExplicitDataFromCSV(True, data_folder=data_folder)
     dsql = ExplicitDataFromSql3(
-        '/home/ong/personal/FiML/FiML/db_exp.sqlite3',
-        'backend_rating', 'user_id', 'film_id', 'rating', 'backend_film', 'dataset_id')    
+        '/home/ong/personal/FiML/FiML/db_large.sqlite3',
+        'backend_rating', 'user_id', 'film_id', 'rating', 'backend_film', 'dataset_id',
+        ut='auth_user',
+        ut_id_col='id',
+        user_offset=0, # who cares
+    )    
 
     md_df = dcsv.fetch_md(list(range(dcsv.M)))
 
