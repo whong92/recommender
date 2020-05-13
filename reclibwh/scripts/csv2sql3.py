@@ -6,7 +6,7 @@ if __name__=="__main__":
 
     dcsv = ExplicitDataFromCSV(True, data_folder=data_folder)
     dsql = ExplicitDataFromSql3(
-        '/home/ong/personal/FiML/FiML/db_large.sqlite3',
+        '/home/ong/personal/FiML/FiML/db.sqlite3',
         'backend_rating', 'user_id', 'film_id', 'rating', 'backend_film', 'dataset_id',
         ut='auth_user',
         ut_id_col='id',
@@ -22,5 +22,7 @@ if __name__=="__main__":
         **{
             'item_ids': md_df.index,
             'names': md_df['title'],
+            'desc': md_df['desc'],
+            'poster_path': md_df['poster_path'],
         }
     )

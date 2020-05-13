@@ -46,6 +46,10 @@ class RecommenderContext:
         self.rec.input_data(self.d)
         self.updated_users = set({}) # in memory cache of which users have and have not been trained, think of a better fix than this!
         self.t = ThreadPoolExecutor(max_workers=1)
+    
+    def get_user_ratings(self, users):
+        ratings, _ = self.d.make_training_datasets(dtype='dense', users=users)
+        return ratings
 
     def submit_recommend_job(self, users):
         def recommend_job():
@@ -87,11 +91,16 @@ def user_recommend():
         if 'users' not in stuff: raise ValidationError('list of users required')
         users = stuff['users']
         users = [user+rC.N_offset for user in users]
+        rated_users, rated, _ = rC.get_user_ratings(users)
         result = rC.submit_recommend_job(users)
         recs, dists = result.result()
-        res = {
-            user-rC.N_offset: {'rec': list(map(lambda x: int(x), rec)), 'dist': list(map(lambda x: float(x), dist))} for user, rec, dist in zip(users, recs[:,:200], dists[:,:200])
-        }
+        res = {}
+        for user, rec, dist in zip(users, recs, dists):
+            user_rated = np.array(rated[rated_users==(user)])
+            mask = np.isin(rec, user_rated, invert=True)
+            rec = rec[mask]
+            dist = dist[mask]
+            res[int(user-rC.N_offset)] = {'rec': list(map(lambda x: int(x), rec[:200])), 'dist': list(map(lambda x: float(x), dist[:200]))}
         return jsonify(res)
     except ValidationError as e:
         return Response('fuck {}'.format(e), 400)
@@ -99,18 +108,24 @@ def user_recommend():
 @app.route('/user_update', methods=('POST',))
 def user_update():
     try:
-        rec = app.stuff['rec']
+        rC = app.stuff['rec']
         stuff = request.get_json()
         users = stuff['users']
         if 'users' not in stuff: raise ValidationError('list of users required')
-        users = [user+rec.N_offset for user in users]
-        update = rec.submit_update_job(users) # update
-        result = rec.submit_recommend_job(users) # recommend
+        users = [user+rC.N_offset for user in users]
+        update = rC.submit_update_job(users) # update
+        result = rC.submit_recommend_job(users) # recommend
         update.result() # wait for update
         recs, dists = result.result() # wait for results
-        res = {
-            user: {'rec': list(map(lambda x: int(x), rec)), 'dist': list(map(lambda x: float(x), dist))} for user, rec, dist in zip(users, recs, dists)
-        }
+
+        rated_users, rated, _ = rC.get_user_ratings(users)
+        res = {}
+        for user, rec, dist in zip(users, recs, dists):
+            user_rated = np.array(rated[rated_users==(user)])
+            mask = np.isin(rec, user_rated, invert=True)
+            rec = rec[mask]
+            dist = dist[mask]
+            res[int(user-rC.N_offset)] = {'rec': list(map(lambda x: int(x), rec[:200])), 'dist': list(map(lambda x: float(x), dist[:200]))}
         return jsonify(res)
     except ValidationError as e:
         return Response('fuck {}'.format(e), 400)

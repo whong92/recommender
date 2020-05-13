@@ -143,10 +143,8 @@ class ExplicitDataFromSql3(ExplicitData):
         users = [(user - self.Noffset) for user in users]
         if users is not None:
             cond_str = ['{rt_u}=?'.format(rt_u=rt_u)]*len(users)
-            print(users)
             cond_str = "(" + " OR ".join(cond_str) + ")"
             cmd += ' WHERE ' + cond_str
-            print(cmd)
             rows = cur.execute(cmd, tuple(users)).fetchall()
         else:
             rows = cur.execute(cmd).fetchall()
@@ -203,9 +201,9 @@ class ExplicitDataFromSql3(ExplicitData):
         it_i  = self.conf['it_item_id_col']
 
 
-        insert_str = 'INSERT INTO {it} ({it_i}, name, created_at) VALUES (?, ?, ?) '.format(it=it, it_i=it_i)
+        insert_str = 'INSERT INTO {it} ({it_i}, created_at, name, desc, poster) VALUES (?, ?, ?, ?, ?) '.format(it=it, it_i=it_i)
 
-        cur.executemany(insert_str, [(idx, name, '2020-04-25 20:43:24.088110') for (idx, name) in zip(kwargs['item_ids'], kwargs['names'])])
+        cur.executemany(insert_str, [(idx, '2020-04-25 20:43:24.088110', name, desc, poster) for (idx, name, desc, poster) in zip(kwargs['item_ids'], kwargs['names'], kwargs['desc'], kwargs['poster_path'])])
         conn.commit()
 
 
