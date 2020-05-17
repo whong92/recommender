@@ -31,7 +31,9 @@ class RecommenderMF(Recommender):
 
         if mode is 'train':
             if mf_kwargs is None:
-                mf_kwargs = {'f': 20, 'lamb': .001, 'lr': .01, 'decay': 0.0, 'epochs': 30, 'batchsize': 5000}
+                mf_kwargs = {
+                    'f': 20, 'lamb': .001, 'lr': .01, 'decay': 0.0, 'epochs': 30, 'batchsize': 5000, 'normalize': None, 'adaptive_reg': False
+                }
             self.estimator = self._get_model()(model_path, n_users, n_items, **mf_kwargs)
 
         if mode is 'predict':
@@ -43,7 +45,6 @@ class RecommenderMF(Recommender):
             with open(config_path, 'r', encoding='utf-8') as fp:
                 self.config = json.load(fp)
 
-            #self.predictor = tf.saved_model.load(model_path)
             self.predictor = self._get_model()(
                 os.path.join(model_path, 'model_best.h5')
                 ,self.config['n_users'], self.config['n_items'], mode=mode
@@ -58,12 +59,13 @@ class RecommenderMF(Recommender):
         self.data = data
 
 
-    def train(self):
+    def train(self, early_stopping=True, tensorboard=True):
         assert self.mode is 'train', "must be in train mode!"
         data_train, data_test = self.data.make_training_datasets(dtype='dense')
         self.estimator.fit(
             *data_train,
             *data_test,
+            early_stopping=early_stopping, tensorboard=tensorboard
         )
 
     def save(self, path):

@@ -281,6 +281,10 @@ class ExplicitDataFromCSV(ExplicitData):
         return len(self.item_map)
     
     @property
+    def Nranked(self):
+        return len(self.ratings)
+    
+    @property
     def stats(self):
         return ExplicitDataFromCSV.calc_rating_stats(self.ratings)
     
