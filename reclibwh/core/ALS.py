@@ -241,6 +241,7 @@ class ALSTF(ALS):
                             initial_value=np.append(self.X, np.zeros(shape=(1, self.K)), axis=0))
             if use_cache: self.XTensor = X
         else: X = self.XTensor
+        for user in users: X[user].assign(tf.zeros([self.K], tf.float64))
         trace = self._run_single_step(Y, X, U, users, prefix="X update", use_cache=True)
         self.X = X.numpy()[:-1]
         self.Y = Y.numpy()[:-1]
