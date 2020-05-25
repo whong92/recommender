@@ -1,0 +1,64 @@
+[
+    {
+        "name": "SVD",
+        "type": "model",
+        "params": null,
+        "epochs": 30,
+        "batchsize": 500,
+        "normalize": {"loc": 0.0, "scale": 5.0},
+        "lr": 0.005,
+        "loss": "PMFLoss",
+        "inputs": ["u_in", "i_in"],
+        "outputs": ["rhat", "P", "Q"]
+    },
+    {
+        "name": "u_in",
+        "type": "input",
+        "params": {"shape": [1], "dtype": "int32"}
+    },
+    {
+        "name": "i_in",
+        "type": "input",
+        "params": {"shape": [1], "dtype": "int32"}
+    },
+    {
+        "name": "P",
+        "type": "embedding",
+        "params":{
+            "input_dim": {{ data.N }}, "output_dim": 20, "input_length": 1, "embeddings_initializer": "random_normal", "dtype": "float32"
+        },
+        "regularizer_params": {
+            "type": "l2", "params":{"l": 1e-03}
+        },
+        "inputs": ["u_in"]
+    },
+    {
+        "name": "Q",
+        "type": "embedding",
+        "params":{
+            "input_dim": {{ data.M }}, "output_dim": 20, "input_length": 1, "embeddings_initializer": "random_normal", "dtype": "float32"
+        },
+        "regularizer_params": {
+            "type": "l2", "params":{"l": 1e-03}
+        },
+        "inputs": ["i_in"]
+    },
+    {
+        "name": "combine_PQ",
+        "type": "combine_embeddings",
+        "params": null,
+        "inputs": ["P", "Q"]
+    },
+    {
+        "name": "combine_all",
+        "type": "combine_sum",
+        "params": null,
+        "inputs": ["combine_PQ"]
+    },
+    {
+        "name": "rhat",
+        "type": "activation",
+        "params": {"activation": "sigmoid"},
+        "inputs": ["combine_all"]
+    }
+]

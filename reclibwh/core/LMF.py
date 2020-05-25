@@ -180,8 +180,9 @@ class LogisticMatrixFactorizer(object):
         Bu.set_weights([Buval])
 
 
-    def fit(self, Utrain, Utest, U, users:Optional[np.array]=None, cb: Union[Callback, List[Callback]]=None,
-            exclude_phase:Optional[Set]=None, ckpt_json:Optional[str]=None, epochs:Optional[int]=None): #, u_train, i_train, r_train, u_test, i_test, r_test):
+    def fit(
+        self, Utrain, Utest, U, users:Optional[np.array]=None, cb: Union[Callback, List[Callback]]=None,
+        exclude_phase:Optional[Set]=None, ckpt_json:Optional[str]=None, epochs:Optional[int]=None):
 
         model = self.model
         X = self.vars['X']

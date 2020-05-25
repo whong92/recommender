@@ -1,181 +1,263 @@
 import numpy as np
 import os
-from tensorflow.keras.layers import Input, Embedding, Dot, Flatten, Activation
+from tensorflow.keras.layers import Input, Embedding, Dot, Flatten, Activation, Add, Subtract
 from tensorflow.keras.models import Model, load_model
 from tensorflow.keras import regularizers, optimizers
 from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping, CSVLogger, TensorBoard
 import tensorflow as tf
-from .PMF import AdaptiveRegularizer, RegularizerInspector
+from .PMF import AdaptiveRegularizer, RegularizerInspector, PMFLoss, ReducedEmbedding
 import parse
 
 from datetime import datetime
 from ..utils.ItemMetadata import ExplicitDataFromCSV
+import json
+from pprint import pprint
+import jinja2
+
+def parse_config_json(config_json, data):
+    
+    with open(config_json, 'r') as fp: s = fp.read()
+    config_s = jinja2.Template(s).render(data=data)
+    print(config_s)
+    config = json.loads(config_s)
+    assert type(config) is list, "config needs to be a list of dicts"
+    
+    for i, c in enumerate(config):
+        assert type(c) is dict, "config needs to be a list of dicts"
+        assert 'type' in c, "need to specify type for all layers"
+        assert 'params' in c, "need to specify params for all layers"
+        if not c['type']=="input":
+            assert 'inputs' in c, "required to specify input names to all layers"
+        if i==0: 
+            assert c['type']=='model'
+            assert 'outputs' in c, "required to specify output names to model"
+        if 'name' not in c: c['name'] = 'layer_{:03d}'.format(i)
+    
+    return config
+
+def make_regularizer(reg_conf=None):
+    """[convenience function to make a 'standard' keras regularizer from some a regularizer config]
+
+    Keyword Arguments:
+        reg_conf {[dict]} -- [dictionary for the regularizer configuration] (default: {None})
+
+    Raises:
+        Exception: [if regularizer not recognized]
+
+    Returns:
+        [keras.regularizer] -- [a standard regularizer object]
+    """
+
+    if reg_conf is None: return None
+    reg_type = reg_conf['type']
+    params = reg_conf['params']
+    if reg_type == "l2": return regularizers.l2(**params)
+    elif reg_type == "l1": return regularizers.l2(**params)
+    else: raise Exception("regularizer not recognized")
+
+def get_model_config(config):
+    return config[0]
+
+def make_model(config: dict):
+    """[
+        function that takes in a model config as a dictionary and makes the 
+        model. For now it instantiates an RMSProp model by default. Will add 
+        options for other optimizers soon]
+
+    Arguments:
+        config {dict} -- [the dictionary describing the model configuration]
+
+    Raises:
+        Exception: [if shenanigans]
+
+    Returns:
+        [keras.Model] -- [a compiled model]
+    """
+
+    input_names = {}
+    name2layers = {}
+    layers = []
+    model_conf = None
+
+    for layer_conf in config:
+
+        layer_type = layer_conf['type']
+        layer_name = layer_conf['name']
+        layer_params = layer_conf['params']
+        layer_inputs = layer_conf.get('inputs', [])
+        layer = None
+        L = None
+        
+        if layer_type == 'model': # differ until the end
+            model_conf = layer_conf
+            continue
+        
+        elif layer_type == 'input':
+            L = Input(**layer_params, name=layer_name)
+            layer = {'layer': L, 'output': L} # inputs are their own outputs
+
+        elif layer_type == 'embedding':
+            L = Embedding(**layer_params, embeddings_regularizer=make_regularizer(layer_conf.get("regularizer_params", None)), name=layer_name)
+        
+        elif layer_type == 'adaptive_regularizer':
+            L = AdaptiveRegularizer(**layer_params, name=layer_name)
+        
+        elif layer_type == 'reduced_embedding':
+            L = ReducedEmbedding(**layer_params, name=layer_name)
+
+        elif layer_type == 'combine_embeddings':
+            inputs = [name2layers[name]['output'] for name in layer_inputs]
+            L = Flatten(name=layer_name)
+            y = L(Dot(2)(inputs))
+            layer = {'layer': L, 'output': y}
+
+        elif layer_type == 'combine_sum':
+            inputs = [name2layers[name]['output'] for name in layer_inputs]
+            y = Add(name=layer_name)(inputs)
+            layer = {'layer': L, 'output': y}
+        
+        elif layer_type == 'combine_sub':
+            inputs = [name2layers[name]['output'] for name in layer_inputs]
+            y = Subtract(name=layer_name)(inputs)
+            layer = {'layer': L, 'output': y}
+
+        elif layer_type == 'activation':
+            L = Activation(**layer_params, name=layer_name)
+            
+        else:
+            raise Exception("Layer type not recognized!")
+
+        if layer is None: # call layer
+            inputs = [name2layers[name]['output'] for name in layer_inputs]
+            y = L(*inputs)
+            layer = {'layer': L, 'output': y}
+        
+        layers.append(layer)
+        name2layers[layer_name] = layer
+        continue
+
+    # default training params
+    epochs = model_conf.get('epochs', 30)
+    batchsize = model_conf.get('batchsize', 500)
+    # TODO: this should really be a property of the data object??
+    normalize = model_conf.get('normalize', None)
+    lr = model_conf.get('lr', 0.01)
+    
+    model_inputs = [name2layers[name]['output'] for name in model_conf['inputs']]
+    model_outputs = [name2layers[name]['output'] for name in model_conf['outputs']]
+    pred_output = model_conf['outputs'][0]
+
+    model = Model(inputs=model_inputs, outputs=model_outputs)
+    model.compile(
+        optimizer=optimizers.RMSprop(learning_rate=lr, rho=0.9, momentum=0.9),
+        loss={pred_output: PMFLoss},
+        metrics = {pred_output: 'mse'}
+    )
+    model.summary(line_length=88)
+
+    return model, model_conf
 
 class MatrixFactorizer(object):
 
     MODEL_FORMAT = 'model.{epoch:03d}-{val_loss:.2f}.h5'
 
     def __init__(
-        self, model_dir, N, M, Nranked, 
-        f=10, lr=0.01, lamb=0.01, decay=0.9, epochs=30, batchsize=5000, 
-        bias=False, normalize=None, adaptive_reg=False, mode='train'
+        self, model_dir, N, M, Nranked, mode='train', config_path=None, saved_model=None,
     ):
-        self.initialize(model_dir, N, M, Nranked, f, lr, lamb, decay, bias=bias, epochs=epochs, batchsize=batchsize, normalize=normalize, adaptive_reg=adaptive_reg)
-    
+        data_conf = {'N': N, 'M': M, 'Nranked': Nranked}
+        self.model_path = model_dir
+        self.model, self.model_conf, self.start_epoch = MatrixFactorizer.intialize_from_json(model_dir, data_conf, saved_model=saved_model,  config_path=config_path)
+
     @staticmethod
-    @tf.function
-    def PMFLoss(r_ui, rhat):
-        return tf.reduce_sum(tf.square(r_ui-rhat))
+    def intialize_from_json(model_path, data_conf, saved_model=None,  config_path=None,):
 
-    def initialize(
-        self, model_path, N, M, Nranked,
-        f=10, lr=0.01, lamb=0.01, decay=0.9, epochs=30, batchsize=5000, 
-        bias=False, normalize=None, adaptive_reg=False,
-        saved_model=None
-    ):
+        start_epoch = 0
 
-        self.saved_model = saved_model
-        self.model_path = model_path
-        self.epochs = epochs
-        self.batchsize = batchsize
-        self.normalize = normalize
-        self.start_epoch = 0
+        assert config_path is not None, "config not provided for model"
+        config = parse_config_json(config_path, data=data_conf)
+        model_conf = get_model_config(config)
 
+        # check for explicitly saved model
         if saved_model is not None: 
-            self.model = tf.keras.models.load_model(self.saved_model, compile=True)
-            self.model.summary(line_length=88)
-            return
+            model = tf.keras.models.load_model(saved_model, compile=True)
+            model.summary(line_length=88)
+            return model, model_conf, start_epoch
         
         # look for checkpoints in model_path
-        
         ckpts = map(lambda x: parse.parse(MatrixFactorizer.MODEL_FORMAT, x), os.listdir(model_path))
         ckpts = list(sorted(filter(lambda x: x is not None, ckpts), key=lambda x: x['epoch'], reverse=True))
         if len(ckpts) > 0:
             ckpt = ckpts[0]
-            self.start_epoch = ckpt['epoch']
-            model_name = os.path.join(self.model_path, MatrixFactorizer.MODEL_FORMAT.format(epoch=ckpt['epoch'], val_loss=ckpt['val_loss']))
-            self.model = tf.keras.models.load_model(
-                model_name, custom_objects={'AdaptiveRegularizer': AdaptiveRegularizer, 'PMFLoss': MatrixFactorizer.PMFLoss}, compile=True)
-            self.model.summary(line_length=88)
-            return
-
-        u_in = Input(shape=(1,), dtype='int32', name='u_in')
-        i_in = Input(shape=(1,), dtype='int32', name='i_in')
-
-        P = Embedding(N, f, dtype='float32',
-                      embeddings_regularizer=regularizers.l2(lamb) if not adaptive_reg and lamb>0. else None, 
-                      input_length=1,
-                      embeddings_initializer='random_normal', name='P')
-        Q = Embedding(M, f, dtype='float32',
-                      embeddings_regularizer=regularizers.l2(lamb) if not adaptive_reg and lamb>0. else None, 
-                      input_length=1,
-                      embeddings_initializer='random_normal', name='Q')
-
-        p = P(u_in)
-        q = Q(i_in)
-
-        activation = 'linear' if normalize is None else 'sigmoid'
-        if bias:
-            Bu = Embedding(N, 1, dtype='float32', embeddings_initializer='random_normal')
-            Bi = Embedding(M, 1, dtype='float32', embeddings_initializer='random_normal')
-            bp = Bu(u_in)
-            bq = Bi(i_in)
-            rhat = Activation(activation, name='rhat')(Flatten()(Dot(2)([p, q])) + bp + bq)
-        else:
-            rhat = Activation(activation, name='rhat')(Flatten()(Dot(2)([p, q])))
+            start_epoch = ckpt['epoch']
+            model_name = os.path.join(model_path, MatrixFactorizer.MODEL_FORMAT.format(epoch=ckpt['epoch'], val_loss=ckpt['val_loss']))
+            model = tf.keras.models.load_model(model_name, compile=True)
+            model.summary(line_length=88)
+            return model, model_conf, start_epoch
         
-        outputs=[rhat, p, q]
-        if adaptive_reg:
-            LambdaP = AdaptiveRegularizer(N, f, Nranked, initial_value=-15., alpha=0.01, name='lambda_p')
-            LambdaQ = AdaptiveRegularizer(M, f, Nranked, initial_value=-15., alpha=0.01, name='lambda_q')
-            rp2 = LambdaP(p)
-            rq2 = LambdaQ(q)
-            outputs += [rp2, rq2]
+        # otherwise make model from scratch
+        print("Initializing model from scratch")
+        model, model_conf = make_model(config)
 
-        self.model = Model(inputs=[u_in, i_in], outputs=outputs)
-        self.model.compile(
-            # optimizer=optimizers.Adam(learning_rate=lr),#, rho=decay),
-            optimizer=optimizers.RMSprop(learning_rate=lr, rho=0.9, momentum=0.9),
-            loss={'rhat': MatrixFactorizer.PMFLoss},
-            metrics = {'rhat': 'mse'}
-        )
-        self.model.summary(line_length=88)
-
-        return
+        return model, model_conf, start_epoch
 
     def fit(
         self, 
-        u_train, i_train, r_train, 
-        u_test, i_test, r_test, 
+        data: ExplicitDataFromCSV,
         early_stopping=True, tensorboard=True,
         extra_callbacks=None
     ):
-        # TODO: checkpointing!
+
+        (u_train, i_train, r_train), (u_test, i_test, r_test) = data.make_training_datasets(dtype='dense')
+
+        batchsize = self.model_conf['batchsize']
+        epochs = self.model_conf['epochs']
+        normalize = self.model_conf['normalize']
         
         u_all = np.concatenate([u_train, u_test])
         i_all = np.concatenate([i_train, i_test])
         r_all = np.concatenate([r_train, r_test])
-        if self.normalize: r_all = (r_all - self.normalize['loc'])/self.normalize['scale']
+        if normalize: r_all = (r_all - normalize['loc'])/normalize['scale']
         val_split = float(len(u_test))/len(u_all)
 
         if tensorboard:
             tensorboard_path = os.path.join(self.model_path, 'tensorboard_logs')
             file_writer = tf.summary.create_file_writer(tensorboard_path + "/metrics")
             file_writer.set_as_default()
-
+        
         self.model.fit(
             {'u_in': u_all, 'i_in': i_all}, {'rhat': r_all},
-            epochs=self.epochs, batch_size=self.batchsize, verbose=1, initial_epoch=self.start_epoch,
+            epochs=epochs, batch_size=batchsize, verbose=1, initial_epoch=self.start_epoch,
             shuffle=True, validation_split=val_split,
             callbacks=[
-                ModelCheckpoint(
-                    os.path.join(self.model_path, MatrixFactorizer.MODEL_FORMAT),
-                ),
+                ModelCheckpoint(os.path.join(self.model_path, MatrixFactorizer.MODEL_FORMAT)),
                 CSVLogger(os.path.join(self.model_path, 'history.csv')),
             ] + 
             ([EarlyStopping(monitor='val_loss', mode='min', verbose=1, patience=10)] if early_stopping else []) +
             ([TensorBoard(log_dir=tensorboard_path)] if tensorboard else []) +
-            (extra_callbacks if extra_callbacks is not None else []) # + [RegularizerInspector(['lambda_p', 'lambda_q'])]
+            (extra_callbacks if extra_callbacks is not None else [])
         )
 
-        #Evaluate the model
-        eval_result = self.model.evaluate(
-            {'u_in': u_test, 'i_in': i_test}, {'rhat': r_test}, batch_size=10000
-        )
-        print('Test: RMSE: %f ' % np.sqrt(eval_result[0]))
-
-    def save(self):
-        self.model.save(os.path.join(self.model_path, 'model.h5'))
+    def save(self, model_path='model.h5'):
+        self.model.save(os.path.join(self.model_path, model_path))
 
     def predict(self, u, i):
-        return self.model.predict({'u_in': u, 'i_in': i})
+        return self.model.predict({'u_in': u, 'i_in': i}, batch_size=5000)
 
+    def add_users(self, num=1):
+        raise NotImplementedError
 
 if __name__=="__main__":
 
     data_folder = '/home/ong/personal/recommender/data/ml-latest-small-2'
-    model_folder = '/home/ong/personal/recommender/models'
+    model_folder = '/home/ong/personal/recommender/models/MF_tmp'
     save_path = os.path.join(model_folder, "MF_{:s}".format(datetime.now().strftime("%Y-%m-%d.%H-%M-%S")))
-    log_dir = '/home/ong/personal/recommender/tmp/' + datetime.now().strftime("%Y%m%d-%H%M%S")
-    d = ExplicitDataFromCSV(True, data_folder=data_folder)
-    file_writer = tf.summary.create_file_writer(log_dir + "/metrics")
-    file_writer.set_as_default()
-
-    '/home/ong/personal/recommender/models'
-
-    data_train, data_test = d.make_training_datasets(dtype='dense')
-    u_train, i_train, r_train = data_train
-    u_test, i_test, r_test = data_test
-
-    # model = make_model(d.N, d.M, f=20, lr=0.005, Nranked=len(r_train))
 
     model = MatrixFactorizer(
-        model_dir=model_folder, N=d.N, M=d.M, f=20, lr=0.005, lamb=0., Nranked=len(r_train), bias=False, batchsize=50, epochs=60, 
-        normalize={'loc':0., 'scale':5.0}, adaptive_reg=True, 
+        model_dir=model_folder, N=d.N, M=d.M,
+        config_path='/home/ong/personal/recommender/reclibwh/core/model_templates/SVD_reg.json.template'
     )
 
     model.fit(
-        u_train, i_train, r_train,
-        u_test, i_test, r_test,
-        extra_callbacks=[RegularizerInspector(['lambda_p', 'lambda_q']), TensorBoard(log_dir)]
+        d
+        # extra_callbacks=[RegularizerInspector(['lambda_p', 'lambda_q']), TensorBoard(log_dir)] # for demo purposes
     )

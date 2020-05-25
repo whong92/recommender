@@ -85,6 +85,7 @@ class RecommenderALS(Recommender):
         AUCC.set_model(self)
         # TODO: improve so not required to construct the entire dataset for an update
         Utrain, _ = self.data.make_training_datasets(users=users, dtype='sparse')
+        print(Utrain)
         trace = self.als.train_update(Utrain, users, cb=AUCC, use_cache=True)
         AUCC.save_result(auc_path)
         return trace, AUCC.AUCe

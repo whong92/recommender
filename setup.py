@@ -27,6 +27,8 @@ setuptools.setup(
         'matplotlib>=3.0.0'
         'scikit-learn>=0.19.2',
         'pandas>=0.23.0',
+        'jinja2>=2.11.2',
+        'parse>=1.15.0'
     ],
     python_requires='>=3.6',
 )

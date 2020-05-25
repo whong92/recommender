@@ -1,4 +1,5 @@
 from ..recommender.recommenderALS import RecommenderALS
+from ..recommender.recommenderMF import RecommenderMFAsymCached
 from ..utils.ItemMetadata import ExplicitDataFromCSV, ExplicitDataFromSql3
 from threading import Thread
 from concurrent.futures import ThreadPoolExecutor
@@ -29,7 +30,8 @@ class RecommenderContext:
 
     def __init__(self, data_folder, model_path):
 
-        self.rec = RecommenderALS(mode='predict', model_path=model_path)
+        #self.rec = RecommenderALS(mode='predict', model_path=model_path)
+        self.rec = RecommenderMFAsymCached(mode='predict', model_path=model_path)
         self.N_offset = self.rec.config['n_users']
         self.d = ExplicitDataFromSql3(
             '/home/ong/personal/FiML/FiML/db.sqlite3',
@@ -133,7 +135,8 @@ def user_update():
 
 data_folder = '/home/ong/personal/recommender/data/ml-20m-2'
 model_folder = '/home/ong/personal/recommender/models'
-model_path = os.path.join(model_folder, 'ALS_2020-04-13.14-16-33')
+# model_path = os.path.join(model_folder, 'ALS_2020-04-13.14-16-33')
+model_path = os.path.join(model_folder, "MF_2020-05-26.22-12-32", "ASVDC")
 
 class CustomServer(Server):
     def __call__(self, app, *args, **kwargs):

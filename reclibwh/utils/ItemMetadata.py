@@ -46,7 +46,8 @@ class ExplicitData(ABC):
 
 class ExplicitDataFromSql3(ExplicitData):
 
-    def __init__(self, sql3_f, rt, rt_user_col, rt_item_fk_col, rt_rating_col, it, it_item_id_col, ut,  ut_id_col, user_offset):
+    # TODO: put all of this shit in a config
+    def __init__(self, sql3_f, rt, rt_user_col, rt_item_fk_col, rt_rating_col, it, it_item_id_col, it_item_mean_col, ut,  ut_id_col, user_offset):
         self.sql3_f = sql3_f
         self.Noffset = user_offset
 
@@ -57,6 +58,7 @@ class ExplicitDataFromSql3(ExplicitData):
             'rt_rating_col': rt_rating_col,
             'item_table': it,
             'it_item_id_col': it_item_id_col,
+            'it_item_mean_col': it_item_mean_col,
             'user_table': ut,
             'ut_id_col': ut_id_col
         }
@@ -123,8 +125,8 @@ class ExplicitDataFromSql3(ExplicitData):
 
     def make_training_datasets(self, dtype:str='dense', ctype:np.dtype=np.int32, rtype:np.dtype=np.float64, users:Optional[Iterable[int]]=None):
         
-        assert len(users) > 0
         if users is None: users = np.arange(self.N)
+        assert len(users) > 0
 
         conn = self.get_conn()
 
@@ -194,6 +196,7 @@ class ExplicitDataFromSql3(ExplicitData):
         """
         assert 'item_ids' in kwargs, "required: item_ids"
         assert 'names' in kwargs, "required: names"
+        assert 'mean_rating' in kwargs, "required: mean_rating"
         conn = self.get_conn()
         cur = conn.cursor()
 
@@ -201,10 +204,35 @@ class ExplicitDataFromSql3(ExplicitData):
         it_i  = self.conf['it_item_id_col']
 
 
-        insert_str = 'INSERT INTO {it} ({it_i}, created_at, name, desc, poster) VALUES (?, ?, ?, ?, ?) '.format(it=it, it_i=it_i)
+        insert_str = 'INSERT INTO {it} ({it_i}, created_at, name, desc, poster, mean_rating) VALUES (?, ?, ?, ?, ?, ?) '.format(it=it, it_i=it_i)
 
-        cur.executemany(insert_str, [(idx, '2020-04-25 20:43:24.088110', name, desc, poster) for (idx, name, desc, poster) in zip(kwargs['item_ids'], kwargs['names'], kwargs['desc'], kwargs['poster_path'])])
+        cur.executemany(insert_str, [(idx, '2020-05-30 20:43:24.088110', name, desc, poster, mean_rating) for (idx, name, desc, poster, mean_rating) in zip(kwargs['item_ids'], kwargs['names'], kwargs['desc'], kwargs['poster_path'], kwargs['mean_rating'])])
         conn.commit()
+    
+        
+    def get_item_mean_ratings(self, items=None):
+
+        conn = self.get_conn()
+        cur = conn.cursor()
+        
+        it  = self.conf['item_table']
+        it_i  = self.conf['it_item_id_col']
+        it_m = self.conf['it_item_mean_col']
+
+        cmd = 'SELECT {it_i}, {it_m} FROM {it}'.format(it_m=it_m, it_i=it_i, it=it)
+        cond_str = ""
+
+        if items is not None:
+            cond_str = ['{it_i}=?'.format(it_i=it_i)]*len(items)
+            cond_str = "(" + " OR ".join(cond_str) + ")"
+            cmd += ' WHERE ' + cond_str
+            rows = cur.execute(cmd, tuple(items)).fetchall()
+        else:
+            rows = cur.execute(cmd).fetchall()
+        
+        mean_df = ExplicitDataFromSql3._sqlite_rows_2_dataframe(rows, [it_i, it_m]).set_index([it_i])
+        mean_df.rename(columns={it_m: 'rating_item_mean'}, inplace=True)
+        return mean_df
 
 
 class ExplicitDataFromCSV(ExplicitData):
@@ -216,8 +244,9 @@ class ExplicitDataFromCSV(ExplicitData):
         self.ratings['split'] = 0
         self.ratings.iloc[test_split]['split'] = 1
         self.md_df = ExplicitDataFromCSV.makeMetadataDf(self.item_map.copy(), metadata_csv, m_item_col)
+        self.stats = ExplicitDataFromCSV.calc_rating_stats(self.ratings)
 
-    def from_saved_csv(self, ratings_csv, split_csv, user_map_csv, item_map_csv, md_csv):
+    def from_saved_csv(self, ratings_csv, split_csv, user_map_csv, item_map_csv, md_csv, stats_csv):
         self.ratings = pd.read_csv(ratings_csv, index_col=None)[['rating', 'item', 'user']]
         self.ratings_split  = pd.read_csv(split_csv, index_col=None)
         assert len(self.ratings) == len(self.ratings_split)
@@ -226,6 +255,7 @@ class ExplicitDataFromCSV(ExplicitData):
         self.user_map = pd.read_csv(user_map_csv, index_col='user_cat')
         self.item_map = pd.read_csv(item_map_csv, index_col='item_cat')
         self.md_df = pd.read_csv(md_csv, index_col='item_cat')
+        self.stats = pd.read_csv(stats_csv, index_col='item')
 
     def from_standard_dataset(self, data_folder):
         self.from_saved_csv(
@@ -234,6 +264,7 @@ class ExplicitDataFromCSV(ExplicitData):
             user_map_csv = os.path.join(data_folder, 'user_map.csv'),
             item_map_csv = os.path.join(data_folder, 'item_map.csv'),
             md_csv = os.path.join(data_folder, 'metadata.csv'),
+            stats_csv = os.path.join(data_folder, 'stats.csv'),
         )
 
     def __init__(self, from_saved=False, **kwargs):
@@ -284,10 +315,9 @@ class ExplicitDataFromCSV(ExplicitData):
     def Nranked(self):
         return len(self.ratings)
     
-    @property
-    def stats(self):
-        return ExplicitDataFromCSV.calc_rating_stats(self.ratings)
-    
+    def update_stats(self):
+        self.stats = ExplicitDataFromCSV.calc_rating_stats(self.ratings)
+        
     def get_ratings_split(self, split):
         if split not in self.ratings.index: return pd.DataFrame({}, columns=self.ratings.columns)
         return self.ratings.loc[self.ratings.split==split]
@@ -325,6 +355,8 @@ class ExplicitDataFromCSV(ExplicitData):
         rating_stats = df.groupby('item', as_index=False).count()[['item', 'user']]
         rating_stats.set_index('item', inplace=True)
         rating_stats.rename({'user': 'r_count'}, inplace=True)
+        rating_item_mean = df.groupby('item', as_index=False).mean()[['rating']]
+        rating_stats['rating_item_mean'] = rating_item_mean
         return rating_stats
 
     @staticmethod
@@ -341,6 +373,7 @@ class ExplicitDataFromCSV(ExplicitData):
         self.user_map.to_csv(os.path.join(dir, 'user_map.csv'))
         self.item_map.to_csv(os.path.join(dir, 'item_map.csv'))
         self.md_df.to_csv(os.path.join(dir, 'metadata.csv'))
+        self.stats.to_csv(os.path.join(dir, 'stats.csv'))
 
     def make_training_datasets(self, dtype:str='dense', ctype:np.dtype=np.int32, rtype:np.dtype=np.float64, users:Optional[Iterable[int]]=None):
         if users is not None:
@@ -376,6 +409,9 @@ class ExplicitDataFromCSV(ExplicitData):
         ratings = self.ratings.loc[users]
 
         return ratings
+    
+    def get_item_mean_ratings(self, items):
+        return self.stats.loc[items, ['rating_item_mean']]
 
 if __name__=="__main__":
     """

@@ -8,6 +8,7 @@ import os
 from keras.callbacks import Callback
 from typing import Union, Optional
 import json
+from ..utils.utils import get_pos_ratings_padded
 
 class ALS:
 
@@ -170,19 +171,6 @@ class ALS:
         with open(ckpt_json, 'w') as fp:
             json.dump({'model_path': model_path, 'trace_path': trace_path, 'epoch': epoch}, fp, indent=4)
 
-def get_and_pad_ratings(R, users, M, batchsize=None):
-    ru = R[users, :]
-    l = np.max(ru.getnnz(axis=1))
-    if batchsize is None:
-        batchsize = len(users)
-    rp = np.zeros(shape=(batchsize, l), dtype=np.float)
-    yp = M*np.ones(shape=(batchsize, l), dtype=np.int)
-    for u, user in enumerate(users):
-        rp[u, :ru[u].data.shape[0]] = ru[u].data
-        yp[u, :ru[u].indices.shape[0]] = ru[u].indices
-    return rp, yp
-
-
 @tf.function(experimental_relax_shapes=True)
 def als_run_regression(
         Y2: tf.Tensor, Lamb: tf.Tensor, Yp: tf.Tensor, r: tf.Tensor, alpha: tf.constant,
@@ -278,7 +266,7 @@ class ALSTF(ALS):
         for i in range(0, len(users), batchsize):
 
             us = users[i:min(i + batchsize, N)] #np.arange(i, )
-            rs, ys = get_and_pad_ratings(R, us, M, batchsize=batchsize)
+            rs, ys = get_pos_ratings_padded(R, us, M, batchsize=batchsize)
 
             Yp = tf.nn.embedding_lookup(Y, ys)
 

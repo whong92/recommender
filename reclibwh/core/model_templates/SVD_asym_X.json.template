@@ -1,0 +1,43 @@
+[
+    {
+        "name": "SVD_asym",
+        "type": "model",
+        "params": null,
+        "epochs": 3,
+        "batchsize": 50,
+        "normalize": {"loc": 0.0, "scale": 5.0},
+        "lr": 0.0005,
+        "loss": "PMFLoss",
+        "inputs": ["ui_in", "bj_in", "ruj_in"],
+        "outputs": ["X"]
+    },
+    {
+        "name": "ui_in",
+        "type": "input",
+        "params": {"shape": [null], "dtype": "int32"}
+    },
+    {
+        "name": "ruj_in",
+        "type": "input",
+        "params": {"shape": [null], "dtype": "float32"}
+    },
+    {
+        "name": "bj_in",
+        "type": "input",
+        "params": {"shape": [null], "dtype": "float32"}
+    },
+    {
+        "name": "roffset",
+        "type": "combine_sub",
+        "params":null,
+        "inputs": ["ruj_in", "bj_in"]
+    },
+    {
+        "name": "X",
+        "type": "reduced_embedding",
+        "params":{
+            "N": {{ data.M+1 }}, "f": 20, "method": "mask_mean", "alpha": 0.5
+        },
+        "inputs": ["ui_in", "roffset"]
+    }
+]
