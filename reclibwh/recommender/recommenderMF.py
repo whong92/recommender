@@ -213,9 +213,11 @@ class RecommenderMFAsymCached(RecommenderMF):
         AUCC = AUCCallback(self.data, auc_path, users, save_fn=lambda: self.estimator.save('best_updated.h5'), batchsize=100)
         AUCC.set_model(self)
         AUCC.on_epoch_end(-1)
-        self.estimator.update_users(U, self.bj, users)
+        self.estimator.update_users(U, self.Bi, users)
         AUCC.on_epoch_end(0)
         AUCC.save_result(auc_path)
+
+        self.estimator.evaluate(self.data, users=users)
 
         return AUCC.AUCe
 

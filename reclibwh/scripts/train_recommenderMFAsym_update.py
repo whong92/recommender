@@ -20,7 +20,7 @@ if __name__=="__main__":
     data_folder = '/home/ong/personal/recommender/data/ml-latest-small-2'
     model_folder = '/home/ong/personal/recommender/models'
 
-    d = ExplicitDataFromCSV(True, data_folder=data_folder)
+    d = ExplicitDataFromCSV(True, data_folder=data_folder, normalize={'loc': 0.0, 'scale': 5.0})
 
     # training
     save_path_asvdc = os.path.join(model_folder, "MF_2020-05-29.22-49-23", "ASVDC")
@@ -37,11 +37,14 @@ if __name__=="__main__":
     )
     rmfa.input_data(d)
 
+    d.set_normalize(None)
     d.add_user()
     (user_train, items_train, ratings_train), (user_test, items_test, ratings_test) = d.make_training_datasets(users=[0])
     user_train[:] = d.N-1
     user_test[:] = d.N-1
     d.add_user_ratings(user_train, items_train, ratings_train, train=True)
     d.add_user_ratings(user_test, items_test, ratings_test, train=False)
+    d.set_normalize({'loc': 0.0, 'scale': 5.0})
+
     rmfa.add_users(1)
     rmfa.train_update(users=np.array([d.N-1]))

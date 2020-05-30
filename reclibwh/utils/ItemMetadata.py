@@ -47,7 +47,7 @@ class ExplicitData(ABC):
 class ExplicitDataFromSql3(ExplicitData):
 
     # TODO: put all of this shit in a config
-    def __init__(self, sql3_f, rt, rt_user_col, rt_item_fk_col, rt_rating_col, it, it_item_id_col, it_item_mean_col, ut,  ut_id_col, user_offset):
+    def __init__(self, sql3_f, rt, rt_user_col, rt_item_fk_col, rt_rating_col, it, it_item_id_col, it_item_mean_col, ut,  ut_id_col, user_offset, normalize=None):
         self.sql3_f = sql3_f
         self.Noffset = user_offset
 
@@ -62,6 +62,7 @@ class ExplicitDataFromSql3(ExplicitData):
             'user_table': ut,
             'ut_id_col': ut_id_col
         }
+        self.normalize = normalize
     
     
     def get_conn(self):
@@ -98,12 +99,17 @@ class ExplicitDataFromSql3(ExplicitData):
             cmd
         )
         res = cur.fetchall()
-        return ExplicitDataFromSql3._sqlite_rows_2_dataframe(res, columns=[rt_ifk, rt_r])
+        ret = ExplicitDataFromSql3._sqlite_rows_2_dataframe(res, columns=[rt_ifk, rt_r])
+        normalize = self.normalize
+        if normalize is not None: ret[rt_r] = (ret[rt_r]-normalize['loc'])/normalize['scale']
+        return ret
 
     def add_user(self):
         raise NotImplementedError
 
     def add_user_ratings(self, users, items, ratings, train=True):
+        
+        assert not self.normalize, "cannot alter data in normalized mode. please set normalize to None"
 
         conn = self.get_conn()
         cur = conn.cursor()
@@ -163,6 +169,9 @@ class ExplicitDataFromSql3(ExplicitData):
         )
         D['user'] += self.Noffset
 
+        normalize = self.normalize
+        if normalize is not None: D['rating'] = (D['rating']-normalize['loc'])/normalize['scale']
+
         emptyD = pd.DataFrame({'user':[], 'item':[], 'rating':[]})
         
         if dtype=='dense':
@@ -194,6 +203,7 @@ class ExplicitDataFromSql3(ExplicitData):
         """
         Utility function for importing stuff from ExplicitDataFromCSV (or others) into ExplicitDataFromSql3
         """
+        assert not self.normalize, "cannot alter data in normalized mode. please set normalize to None"
         assert 'item_ids' in kwargs, "required: item_ids"
         assert 'names' in kwargs, "required: names"
         assert 'mean_rating' in kwargs, "required: mean_rating"
@@ -232,6 +242,9 @@ class ExplicitDataFromSql3(ExplicitData):
         
         mean_df = ExplicitDataFromSql3._sqlite_rows_2_dataframe(rows, [it_i, it_m]).set_index([it_i])
         mean_df.rename(columns={it_m: 'rating_item_mean'}, inplace=True)
+        
+        normalize = self.normalize
+        if normalize is not None: mean_df['rating_item_mean'] = (mean_df['rating_item_mean']-normalize['loc'])/normalize['scale']
         return mean_df
 
 
@@ -267,7 +280,7 @@ class ExplicitDataFromCSV(ExplicitData):
             stats_csv = os.path.join(data_folder, 'stats.csv'),
         )
 
-    def __init__(self, from_saved=False, **kwargs):
+    def __init__(self, from_saved=False, normalize=None, **kwargs):
         """
         The user/item columns in all stored tables  in this class are in terms of the
         sanitized user/items (0-M/0-N) respectively. self.item_map and self.user_map
@@ -281,7 +294,23 @@ class ExplicitDataFromCSV(ExplicitData):
             self.from_standard_dataset(**kwargs)
         else:
             self.from_raw_csv(**kwargs)
+
+        self.normalize = None
+        self.set_normalize(normalize)
         return
+    
+    def set_normalize(self, normalize):
+        was_normalized = self.normalize is not None
+        self.normalize = normalize
+        if normalize:
+            if was_normalized: return
+            self.unnormalized = (self.ratings, self.stats)
+            self.ratings, self.stats = self.unnormalized[0].copy(), self.unnormalized[1].copy()
+            self.ratings.loc[:, 'rating'] = (self.ratings['rating'] - normalize['loc'])/normalize['scale']
+            self.stats.loc[:, 'rating_item_mean'] = (self.stats['rating_item_mean'] - normalize['loc'])/normalize['scale']
+        else:
+            if not was_normalized: return
+            self.ratings, self.stats = self.unnormalized
 
     def fetch_md(self, item_ids):
         return self.md_df.loc[item_ids]
@@ -316,6 +345,7 @@ class ExplicitDataFromCSV(ExplicitData):
         return len(self.ratings)
     
     def update_stats(self):
+        assert not self.normalize, "cannot calculate stats in normalized mode. please set normalize to None"
         self.stats = ExplicitDataFromCSV.calc_rating_stats(self.ratings)
         
     def get_ratings_split(self, split):
@@ -323,11 +353,13 @@ class ExplicitDataFromCSV(ExplicitData):
         return self.ratings.loc[self.ratings.split==split]
 
     def add_user(self):
+        assert not self.normalize, "cannot alter data in normalized mode. please set normalize to None"
         self.user_map = self.user_map.append(
             pd.DataFrame({'user': ['manual_add_{:d}'.format(self.N)]}, index=[self.N])
         )
 
     def add_user_ratings(self, users, items, ratings, train=True):
+        assert not self.normalize, "cannot alter data in normalized mode. please set normalize to None"
         for u in users: assert u in self.user_map.index
         update = pd.DataFrame(
             {'user': users, 'item': items, 'rating': ratings, 'split': [int(not train)]*len(users)}
@@ -336,6 +368,7 @@ class ExplicitDataFromCSV(ExplicitData):
         return update
 
     def pop_user_ratings(self, users, train=True):
+        assert not self.normalize, "cannot alter data in normalized mode. please set normalize to None"
         for u in users: assert u in self.user_map.index
         split = int(not train)
         dropped = self.ratings.loc[[(u, split) for u in users]]
@@ -368,6 +401,7 @@ class ExplicitDataFromCSV(ExplicitData):
         return item_map
 
     def save(self, dir):
+        assert not self.normalize, "cannot sasve in normalized mode. please set normalize to None"
         self.ratings[['rating', 'item', 'user']].to_csv(os.path.join(dir, 'ratings_sanitized.csv'), index=False)
         self.ratings[['split']].to_csv(os.path.join(dir, 'ratings_split.csv'), index=False)
         self.user_map.to_csv(os.path.join(dir, 'user_map.csv'))

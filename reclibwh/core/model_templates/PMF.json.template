@@ -5,7 +5,6 @@
         "params": null,
         "epochs": 30,
         "batchsize": 500,
-        "normalize": {"loc": 0.0, "scale": 5.0},
         "lr": 0.005,
         "loss": "PMFLoss",
         "inputs": ["u_in", "i_in"],
@@ -60,15 +59,9 @@
         "inputs": ["P", "Q"]
     },
     {
-        "name": "combine_all",
-        "type": "combine_sum",
-        "params": null,
-        "inputs": ["combine_PQ"]
-    },
-    {
         "name": "rhat",
         "type": "activation",
         "params": {"activation": "sigmoid"},
-        "inputs": ["combine_all"]
+        "inputs": ["combine_PQ"]
     }
 ]

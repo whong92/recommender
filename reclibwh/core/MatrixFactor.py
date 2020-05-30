@@ -6,6 +6,8 @@ from tensorflow.keras import regularizers, optimizers
 from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping, CSVLogger, TensorBoard
 import tensorflow as tf
 from .PMF import AdaptiveRegularizer, RegularizerInspector, PMFLoss, ReducedEmbedding
+from ..utils.utils import get_pos_ratings_padded, mean_nnz
+import scipy.sparse as sps
 import parse
 
 from datetime import datetime
@@ -18,7 +20,6 @@ def parse_config_json(config_json, data):
     
     with open(config_json, 'r') as fp: s = fp.read()
     config_s = jinja2.Template(s).render(data=data)
-    print(config_s)
     config = json.loads(config_s)
     assert type(config) is list, "config needs to be a list of dicts"
     
@@ -140,7 +141,6 @@ def make_model(config: dict):
     epochs = model_conf.get('epochs', 30)
     batchsize = model_conf.get('batchsize', 500)
     # TODO: this should really be a property of the data object??
-    normalize = model_conf.get('normalize', None)
     lr = model_conf.get('lr', 0.01)
     
     model_inputs = [name2layers[name]['output'] for name in model_conf['inputs']]
@@ -156,6 +156,85 @@ def make_model(config: dict):
     model.summary(line_length=88)
 
     return model, model_conf
+
+
+class MatrixFactorizerDataIterator(object):
+
+    def __init__(self, data: ExplicitDataFromCSV, batchsize: int, epochs: int, train: bool=False):
+        self.data = data
+        self.batchsize = batchsize
+        self.epochs = epochs
+        self.length = (self.data.Nranked//batchsize + 1)*epochs
+        self.train = train
+        self.bla = self.make_data()
+    
+    def make_data(self):
+        train = self.train
+        (u_train, i_train, r_train), (u_test, i_test, r_test) = self.data.make_training_datasets(dtype='dense')
+        if train: users, items, ratings = u_train, i_train, r_train
+        else:  users, items, ratings = u_test, i_test, r_test
+        return (users, items, ratings)
+
+    def iterate(self):
+        
+        batchsize = self.batchsize
+        epochs = self.epochs
+        users, items, ratings = self.bla
+
+        num_iter = len(users)//batchsize + 1
+        for epoch in range(epochs):
+            for i in range(num_iter):
+                s = i*batchsize
+                e = min((i+1)*batchsize, len(users))
+                u = users[s:e]
+                i = items[s:e]
+                r = ratings[s:e]
+                yield {'u_in': u, 'i_in': i}, {'rhat': r}
+        return
+    
+    def __len__(self):
+        batchsize = self.batchsize
+        epochs = self.epochs
+        return np.ceil(len(self.bla[0])/batchsize)*epochs
+
+
+class AsymSVDDataIterator(MatrixFactorizerDataIterator):
+
+    def make_data(self):
+        train = self.train
+        (u_train, i_train, r_train), (u_test, i_test, r_test) = self.data.make_training_datasets(dtype='dense')
+        if train: users, items, ratings = u_train, i_train, r_train
+        else:  users, items, ratings = u_test, i_test, r_test
+        U, _ = self.data.make_training_datasets(dtype='sparse')
+        return (users, items, ratings, U)
+    
+    def iterate(self):
+        
+        batchsize = self.batchsize
+        epochs = self.epochs
+        users, items, ratings, U = self.bla
+
+        Ucsc = sps.csc_matrix(U)
+        Bi = np.reshape(np.array(mean_nnz(Ucsc, axis=0, mu=0)), newshape=(-1,))
+        num_iter = len(users)//batchsize + 1
+        for epoch in range(epochs):
+            for i in range(num_iter):
+                s = i*batchsize
+                e = min((i+1)*batchsize, len(users))
+                u = users[s:e]
+                i = items[s:e]
+                r = ratings[s:e]
+                rs, ys = get_pos_ratings_padded(U, u, 0, offset_yp=1)
+                bs = Bi[ys-1]
+                yield {'u_in': u, 'i_in': i, 'uj_in': ys, 'bj_in': bs, 'ruj_in': rs}, {'rhat': r}
+        return
+
+
+class LMFDataIterator(MatrixFactorizerDataIterator):
+
+    def iterator(self, train=False):
+        raise NotImplementedError
+        
 
 class MatrixFactorizer(object):
 
@@ -199,6 +278,11 @@ class MatrixFactorizer(object):
         model, model_conf = make_model(config)
 
         return model, model_conf, start_epoch
+    
+    def make_data_iterator(self, data: ExplicitDataFromCSV, train=True):
+        batchsize = self.model_conf['batchsize'] if train else 5000
+        epochs = self.model_conf['epochs']
+        return MatrixFactorizerDataIterator(data, batchsize, epochs, train=train)
 
     def fit(
         self, 
@@ -206,18 +290,14 @@ class MatrixFactorizer(object):
         early_stopping=True, tensorboard=True,
         extra_callbacks=None
     ):
-
-        (u_train, i_train, r_train), (u_test, i_test, r_test) = data.make_training_datasets(dtype='dense')
-
-        batchsize = self.model_conf['batchsize']
-        epochs = self.model_conf['epochs']
-        normalize = self.model_conf['normalize']
         
-        u_all = np.concatenate([u_train, u_test])
-        i_all = np.concatenate([i_train, i_test])
-        r_all = np.concatenate([r_train, r_test])
-        if normalize: r_all = (r_all - normalize['loc'])/normalize['scale']
-        val_split = float(len(u_test))/len(u_all)
+        train_data_iter = self.make_data_iterator(data, train=True)
+        val_data_iter = self.make_data_iterator(data, train=False)
+        
+        epochs = train_data_iter.epochs
+        steps_per_epoch = len(train_data_iter)//epochs
+        validation_batch_size = val_data_iter.batchsize
+        validation_steps = len(val_data_iter)//val_data_iter.epochs
 
         if tensorboard:
             tensorboard_path = os.path.join(self.model_path, 'tensorboard_logs')
@@ -225,9 +305,12 @@ class MatrixFactorizer(object):
             file_writer.set_as_default()
         
         self.model.fit(
-            {'u_in': u_all, 'i_in': i_all}, {'rhat': r_all},
-            epochs=epochs, batch_size=batchsize, verbose=1, initial_epoch=self.start_epoch,
-            shuffle=True, validation_split=val_split,
+            train_data_iter.iterate(), 
+            steps_per_epoch=steps_per_epoch, epochs=epochs,
+            validation_data=val_data_iter.iterate(), 
+            validation_batch_size=validation_batch_size, validation_steps=validation_steps, 
+            verbose=1, initial_epoch=self.start_epoch,
+            shuffle=True,
             callbacks=[
                 ModelCheckpoint(os.path.join(self.model_path, MatrixFactorizer.MODEL_FORMAT)),
                 CSVLogger(os.path.join(self.model_path, 'history.csv')),
@@ -241,10 +324,20 @@ class MatrixFactorizer(object):
         self.model.save(os.path.join(self.model_path, model_path))
 
     def predict(self, u, i):
+        # TODO: use model_conf here to check against input dict
         return self.model.predict({'u_in': u, 'i_in': i}, batch_size=5000)
 
     def add_users(self, num=1):
         raise NotImplementedError
+
+    def evaluate(self, data: ExplicitDataFromCSV):
+
+        tmp = self.model_conf['epochs']
+        self.model_conf['epochs'] = 1
+        validation_data = self.make_data_iterator(data, train=False)
+        self.model_conf['epochs'] = tmp
+        
+        self.model.evaluate(validation_data.iterate())
 
 if __name__=="__main__":
 

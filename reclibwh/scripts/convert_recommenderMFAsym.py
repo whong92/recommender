@@ -20,11 +20,11 @@ if __name__=="__main__":
     data_folder = '/home/ong/personal/recommender/data/ml-latest-small-2'
     model_folder = '/home/ong/personal/recommender/models'
 
-    d = ExplicitDataFromCSV(True, data_folder=data_folder)
+    d = ExplicitDataFromCSV(True, data_folder=data_folder, normalize={'loc': 0.0, 'scale': 5.0})
 
     # training
-    save_path = os.path.join(model_folder, "MF_2020-05-30.20-43-16")
-    save_path_asvdc = os.path.join(model_folder, "MF_2020-05-30.20-43-16", "ASVDC")
+    save_path = os.path.join(model_folder, "MF_2020-05-30.23-40-30")
+    save_path_asvdc = os.path.join(save_path, "ASVDC")
     if not os.path.exists(save_path_asvdc): os.mkdir(save_path_asvdc)
     aucc = AUCCallback(
         data=d, outfile=os.path.join(save_path, 'AUC.csv'), 
@@ -54,7 +54,7 @@ if __name__=="__main__":
                 'config_path_X': '/home/ong/personal/recommender/reclibwh/core/model_templates/SVD_asym_X.json.template',
                 'config_path_main': '/home/ong/personal/recommender/reclibwh/core/model_templates/SVD_asym_cached.json.template'
             },
-            model_path=save_path_asvdc, saved_model=os.path.join(save_path, m)
+            model_path=save_path_asvdc, saved_model=None
         )
 
         rmfa.input_data(d)

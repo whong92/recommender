@@ -5,11 +5,10 @@ import os
 
 if __name__=="__main__":
 
-    data_folder = '/home/ong/personal/recommender/data/ml-20m-2'
+    data_folder = '/home/ong/personal/recommender/data/ml-latest-small-2'
     model_folder = '/home/ong/personal/recommender/models'
 
-    d = ExplicitDataFromCSV(True, data_folder=data_folder)
-    d.save(data_folder)
+    d = ExplicitDataFromCSV(True, data_folder=data_folder, normalize={'loc': 0.0, 'scale': 5.0})
 
     # training
     save_path = os.path.join(model_folder, "MF_{:s}".format(datetime.now().strftime("%Y-%m-%d.%H-%M-%S")))

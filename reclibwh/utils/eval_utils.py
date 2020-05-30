@@ -47,6 +47,7 @@ def eval_model(model: Recommender, data: ExplicitDataFromCSV, batchsize:int=10, 
     progbar = generic_utils.Progbar(len(M))
 
     Utrain, Utest = data.make_training_datasets(dtype='sparse', users=M)
+    median = 3.0 if not data.normalize else 0.5
 
     for m in range(0,len(M),batchsize):
         t = min(len(M), m + batchsize)
@@ -54,7 +55,7 @@ def eval_model(model: Recommender, data: ExplicitDataFromCSV, batchsize:int=10, 
         for i, rec in enumerate(recs):
             _, df_train, _ = get_pos_ratings(Utrain, [M[m+i]], data.M)
             _, df_test, r_test = get_pos_ratings(Utest, [M[m + i]], data.M)
-            df_test_rel = df_test[r_test>3.0]
+            df_test_rel = df_test[r_test>median]
             auc = compute_auc(rec, df_test_rel, df_train)
             if auc < 0: continue
             AUC[m+i] = auc
