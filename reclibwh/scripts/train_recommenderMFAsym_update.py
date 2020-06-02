@@ -23,17 +23,17 @@ if __name__=="__main__":
     d = ExplicitDataFromCSV(True, data_folder=data_folder, normalize={'loc': 0.0, 'scale': 5.0})
 
     # training
-    save_path_asvdc = os.path.join(model_folder, "MF_2020-05-29.22-49-23", "ASVDC")
+    save_path_asvdc = os.path.join(model_folder, "MF_2020-05-30.23-40-30", "ASVDC")
     if not os.path.exists(save_path_asvdc): os.mkdir(save_path_asvdc)
 
-    saved_model = os.path.join(save_path_asvdc, 'model_best.h5')
+    saved_model_X = os.path.join(save_path_asvdc, 'model_best_X.h5')
+    saved_model_main = os.path.join(save_path_asvdc, 'model_best_main.h5')
     rmfa = RecommenderMFAsymCached(
         mode='predict', n_users=d.N, n_items=d.M, n_ranked=d.Nranked,
         mf_kwargs={
-            'config_path_X': '/home/ong/personal/recommender/reclibwh/core/model_templates/SVD_asym_X.json.template',
-            'config_path_main': '/home/ong/personal/recommender/reclibwh/core/model_templates/SVD_asym_cached.json.template'
+            'config_path': 'SVD_asym_cached.json.template'
         },
-        model_path=save_path_asvdc, saved_model=saved_model
+        model_path=save_path_asvdc, saved_model=[saved_model_X, saved_model_main]
     )
     rmfa.input_data(d)
 

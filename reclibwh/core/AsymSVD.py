@@ -23,7 +23,7 @@ class AsymSVD(MatrixFactorizer):
     def predict(self, u, i, uj, bj, rj):
         return self.model.predict({'u_in': u, 'i_in': i, 'uj_in': uj, 'bj_in': bj, 'ruj_in': rj}, batch_size=5000)
 
-class AsymSVDCached:
+class AsymSVDCached(MatrixFactorizer):
     """[
         A cached version the asymmetric SVD, storing the X factors in one model
         (model_X), and the derived user factors in another (model_main). When
@@ -40,23 +40,11 @@ class AsymSVDCached:
     ]
     """
 
-    def __init__(
-        self, model_dir, N, M, Nranked, mode='train', config_path_X=None, config_path_main=None, saved_model=None
-    ):
-        data_conf = {'N': N, 'M': M}
-        self.model_path = model_dir
-        
-        self.config_path_X = config_path_X
-        self.config_path_main = config_path_main
-        self.data_conf = data_conf
-
-        saved_model_X = saved_model.rstrip(".h5")+"_X.h5" if saved_model is not None else None
-        saved_model_main = saved_model.rstrip(".h5")+"_main.h5" if saved_model is not None else None
-
-        self.model_X, self.model_conf_X, _ = MatrixFactorizer.intialize_from_json(model_dir, data_conf, saved_model=saved_model_X,  config_path=config_path_X)
-
-        self.model_main, self.model_conf_main, _ = MatrixFactorizer.intialize_from_json(model_dir, data_conf, saved_model=saved_model_main,  config_path=config_path_main)
-    
+    def __init__(self, *args, **kwargs):
+        super(AsymSVDCached, self).__init__(*args, **kwargs)
+        self.model_X, self.model_conf_X = self.models[0], self.model_confs[0]
+        self.model_main, self.model_conf_main = self.models[1], self.model_confs[1]
+ 
     def save(self, model_path='model.h5'):
         self.model_X.save(os.path.join(self.model_path, model_path.rstrip('.h5')+'_X.h5'))
         self.model_main.save(os.path.join(self.model_path, model_path.rstrip('.h5')+'_main.h5'))
@@ -93,7 +81,7 @@ class AsymSVDCached:
 
         self.data_conf['N'] += num
 
-        new_model_main, new_model_conf_main, _ = MatrixFactorizer.intialize_from_json(self.model_path, self.data_conf, saved_model=None, config_path=self.config_path_main)
+        [_, new_model_main], [_, new_model_conf_main], _ = MatrixFactorizer.intialize_from_json(self.model_path, self.data_conf, saved_model=None, config_path=self.config_path)
 
         # update old embeddings
         oldX = self.model_main.get_layer('Q').get_weights()[0]
@@ -120,6 +108,7 @@ class AsymSVDCached:
     def evaluate(self, data: ExplicitDataFromCSV, users: Optional[Iterable[int]]=None):
 
         _, (u_test, i_test, r_test) = data.make_training_datasets(dtype='dense', users=users)
+        if len(u_test) == 0: return
         self.model_main.evaluate(x={'u_in': u_test, 'i_in': i_test}, y={'rhat': r_test}, batch_size=5000)
 
 if __name__=="__main__":

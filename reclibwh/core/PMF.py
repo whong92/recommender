@@ -101,7 +101,6 @@ class ReductionLayer(Layer):
         Returns:
             [tf.Tensor] -- [the computed reduced embedding]
         """
-        # tf.print(' ============ ', weights)
         counts = tf.ones(shape=(1,))
         mask = tf.cast(mask, tf.float32)
         if (mask is not None) and (self.method in {'mask_mean'}):

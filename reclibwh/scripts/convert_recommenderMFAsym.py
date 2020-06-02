@@ -42,7 +42,7 @@ if __name__=="__main__":
         rmf = RecommenderMFAsym(
             mode='predict', n_users=d.N, n_items=d.M, n_ranked=d.Nranked,
             mf_kwargs={
-                'config_path': '/home/ong/personal/recommender/reclibwh/core/model_templates/SVD_asym.json.template'
+                'config_path': 'SVD_asym.json.template'
             },
             model_path=save_path, saved_model=os.path.join(save_path, m)
         )
@@ -51,8 +51,7 @@ if __name__=="__main__":
         rmfa = RecommenderMFAsymCached(
             mode='train', n_users=d.N, n_items=d.M, n_ranked=d.Nranked,
             mf_kwargs={
-                'config_path_X': '/home/ong/personal/recommender/reclibwh/core/model_templates/SVD_asym_X.json.template',
-                'config_path_main': '/home/ong/personal/recommender/reclibwh/core/model_templates/SVD_asym_cached.json.template'
+                'config_path': 'SVD_asym_cached.json.template'
             },
             model_path=save_path_asvdc, saved_model=None
         )

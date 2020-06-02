@@ -23,16 +23,15 @@ class RecommenderMF(Recommender):
                  , model_path=None, saved_model=None):
 
         super(RecommenderMF, self).__init__(model_path)
-
+        
         self.mode = mode
         self.estimator = None
         self.config = {'n_users': n_users, 'n_items': n_items, 'n_ranked': n_ranked, 'mf_kwargs': mf_kwargs}
-
         if mode is 'train':
             if mf_kwargs is None:
                 mf_kwargs = {'config_path': None}
             self.estimator = self._get_model()(model_path, n_users, n_items, n_ranked, **mf_kwargs)
-
+        
         if mode is 'predict':
 
             assert model_path is not None
@@ -40,7 +39,6 @@ class RecommenderMF(Recommender):
 
             with open(config_path, 'r', encoding='utf-8') as fp:
                 self.config = json.load(fp)
-
             self.estimator = self._get_model()(
                 model_path,
                 self.config['n_users'], self.config['n_items'], self.config['n_ranked'], **self.config['mf_kwargs'], mode=mode,
@@ -131,66 +129,13 @@ class RecommenderMFAsym(RecommenderMF):
     def add_users(self, num=1):
         pass
 
-    def recommend(self, u_ins):
-
-        """[
-            the recommend step of this model involves a call to make_training_datasets from ExplicitDataCSV
-            which involves calls to pandas.loc on a pandas dataframe. this is extremely slow for reasons 
-            unclear to me at this time. As a solution, recommend is implemented such that calling recommend
-            for a large batch of u_ins is more efficient than just many single calss, as this involves only 
-            one call to make_training_datasets.
-
-            this should not be an issue, however when using SQL data (I hope)
-        ]
-
-        Arguments:
-            u_ins {[type]} -- [description]
-
-        Keyword Arguments:
-            batchsize {int} -- [description] (default: {2})
-
-        Returns:
-            [type] -- [description]
-        """
-
-        batchsize = 2
-        u_ins = np.array(u_ins)
-        ni = self.config['n_items']
-
-        # the bottle neck is here, pandas loc very slow on get_user_ratings
-        Utrain, U_test = self.data.make_training_datasets(users=np.unique(u_ins), dtype='sparse')
-        if self.Bi is None: 
-            self.Bi = np.array(self.data.get_item_mean_ratings(np.arange(self.data.M))['rating_item_mean'])
-
-        all_rhats = np.zeros(shape=(len(u_ins), ni))
-        
-        for i in range(0, len(u_ins)//batchsize + 1):
-
-            start = i*batchsize
-            end = min((i+1)*batchsize, len(u_ins))
-            u_in = u_ins[start:end]
-            nu = u_in.shape[0]
-            if nu == 0: continue
-            rs, ys = get_pos_ratings_padded(Utrain, u_in, padding_val=0, offset_yp=1, repeat_each=ni)
-            bjs = self.Bi[ys-1]
-            bla = self.estimator.predict(
-                np.repeat(np.expand_dims(u_in, 0), ni).transpose().flatten(), 
-                np.tile(np.arange(ni), nu), 
-                ys, bjs, rs
-            )
-            
-            bla = list(map(np.squeeze, bla))
-            rhats = bla[0]
-            rhats = rhats.reshape(nu,-1)
-            all_rhats[start:end, :] = rhats
-
-        return np.argsort(all_rhats)[:, ::-1], np.sort(all_rhats)[:, ::-1]
-    
-
 class RecommenderMFAsymCached(RecommenderMF):
 
-    def __init__(self, *args, **kwargs):
-        super(RecommenderMFAsymCached, self).__init__(*args, **kwargs)
+    def __init__(self, mode='predict', model_path=None, saved_model=None, **kwargs):
+        assert mode=='predict'
+        saved_model = saved_model if saved_model is not None else \
+            [os.path.join(model_path, 'model_best_X.h5'), os.path.join(model_path, 'model_best_main.h5')] 
+        super(RecommenderMFAsymCached, self).__init__(mode=mode, model_path=model_path, saved_model=saved_model, **kwargs)
         self.Bi = None
 
     def _get_model(self):
@@ -199,7 +144,7 @@ class RecommenderMFAsymCached(RecommenderMF):
     def import_asym(self, rmfa: RecommenderMFAsym):
         Utrain, _ = self.data.make_training_datasets(users=None, dtype='sparse')
         if self.Bi is None: 
-            self.Bi = np.array(self.data.get_item_mean_ratings(np.arange(self.data.M))['rating_item_mean'])
+            self.Bi = np.array(self.data.get_item_mean_ratings(None)['rating_item_mean'])
         self.estimator.import_ASVD_weights(rmfa.estimator, Utrain, self.Bi)
     
     # AsymSVD doesn't really have a notion of users, so these are fine
@@ -208,7 +153,7 @@ class RecommenderMFAsymCached(RecommenderMF):
         Utrain, Utest = self.data.make_training_datasets(dtype='sparse', users=users)
         U = Utrain + Utest
         if self.Bi is None: 
-            self.Bi = np.array(self.data.get_item_mean_ratings(np.arange(self.data.M))['rating_item_mean'])
+            self.Bi = np.array(self.data.get_item_mean_ratings(None)['rating_item_mean'])
         auc_path = os.path.join(self.model_file, 'AUC_update.csv')
         AUCC = AUCCallback(self.data, auc_path, users, save_fn=lambda: self.estimator.save('best_updated.h5'), batchsize=100)
         AUCC.set_model(self)

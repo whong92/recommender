@@ -14,12 +14,15 @@ from datetime import datetime
 from ..utils.ItemMetadata import ExplicitDataFromCSV
 import json
 from pprint import pprint
-import jinja2
+from jinja2 import Environment, PackageLoader, select_autoescape
+from tqdm import tqdm
 
 def parse_config_json(config_json, data):
     
-    with open(config_json, 'r') as fp: s = fp.read()
-    config_s = jinja2.Template(s).render(data=data)
+    env = Environment(
+        loader=PackageLoader('reclibwh', 'core/model_templates'), autoescape=select_autoescape(['json'])
+    )
+    config_s = env.get_template(config_json).render(data=data)
     config = json.loads(config_s)
     assert type(config) is list, "config needs to be a list of dicts"
     
@@ -57,7 +60,7 @@ def make_regularizer(reg_conf=None):
     else: raise Exception("regularizer not recognized")
 
 def get_model_config(config):
-    return config[0]
+    return list(filter(lambda x: x['type']=='model',config))
 
 def make_model(config: dict):
     """[
@@ -78,7 +81,8 @@ def make_model(config: dict):
     input_names = {}
     name2layers = {}
     layers = []
-    model_conf = None
+    model_confs = []
+    models = []
 
     for layer_conf in config:
 
@@ -90,7 +94,7 @@ def make_model(config: dict):
         L = None
         
         if layer_type == 'model': # differ until the end
-            model_conf = layer_conf
+            model_confs.append(layer_conf)
             continue
         
         elif layer_type == 'input':
@@ -126,7 +130,7 @@ def make_model(config: dict):
             L = Activation(**layer_params, name=layer_name)
             
         else:
-            raise Exception("Layer type not recognized!")
+            raise Exception("Layer type not recognized {:s}!".format(layer_type))
 
         if layer is None: # call layer
             inputs = [name2layers[name]['output'] for name in layer_inputs]
@@ -137,25 +141,28 @@ def make_model(config: dict):
         name2layers[layer_name] = layer
         continue
 
-    # default training params
-    epochs = model_conf.get('epochs', 30)
-    batchsize = model_conf.get('batchsize', 500)
-    # TODO: this should really be a property of the data object??
-    lr = model_conf.get('lr', 0.01)
-    
-    model_inputs = [name2layers[name]['output'] for name in model_conf['inputs']]
-    model_outputs = [name2layers[name]['output'] for name in model_conf['outputs']]
-    pred_output = model_conf['outputs'][0]
+    for model_conf in model_confs:
 
-    model = Model(inputs=model_inputs, outputs=model_outputs)
-    model.compile(
-        optimizer=optimizers.RMSprop(learning_rate=lr, rho=0.9, momentum=0.9),
-        loss={pred_output: PMFLoss},
-        metrics = {pred_output: 'mse'}
-    )
-    model.summary(line_length=88)
+        # default training params
+        epochs = model_conf.get('epochs', 30)
+        batchsize = model_conf.get('batchsize', 500)
+        # TODO: this should really be a property of the data object??
+        lr = model_conf.get('lr', 0.01)
+        
+        model_inputs = [name2layers[name]['output'] for name in model_conf['inputs']]
+        model_outputs = [name2layers[name]['output'] for name in model_conf['outputs']]
+        pred_output = model_conf['outputs'][0]
 
-    return model, model_conf
+        model = Model(inputs=model_inputs, outputs=model_outputs)
+        model.compile(
+            optimizer=optimizers.RMSprop(learning_rate=lr, rho=0.9, momentum=0.9),
+            loss={pred_output: PMFLoss},
+            metrics = {pred_output: 'mse'}
+        )
+        model.summary(line_length=88)
+        models.append(model)
+
+    return models, model_confs
 
 
 class MatrixFactorizerDataIterator(object):
@@ -195,7 +202,7 @@ class MatrixFactorizerDataIterator(object):
     def __len__(self):
         batchsize = self.batchsize
         epochs = self.epochs
-        return np.ceil(len(self.bla[0])/batchsize)*epochs
+        return int(np.ceil(len(self.bla[0])/batchsize)*epochs)
 
 
 class AsymSVDDataIterator(MatrixFactorizerDataIterator):
@@ -243,24 +250,33 @@ class MatrixFactorizer(object):
     def __init__(
         self, model_dir, N, M, Nranked, mode='train', config_path=None, saved_model=None,
     ):
+        print(model_dir, config_path)
         data_conf = {'N': N, 'M': M, 'Nranked': Nranked}
+        self.data_conf = data_conf
         self.model_path = model_dir
-        self.model, self.model_conf, self.start_epoch = MatrixFactorizer.intialize_from_json(model_dir, data_conf, saved_model=saved_model,  config_path=config_path)
+        self.config_path = config_path
+        self.models, self.model_confs, self.start_epoch = MatrixFactorizer.intialize_from_json(model_dir, data_conf, saved_model=saved_model,  config_path=config_path)
+        self.model = self.models[0]
+        self.model_conf = self.model_confs[0]
 
     @staticmethod
-    def intialize_from_json(model_path, data_conf, saved_model=None,  config_path=None,):
+    def intialize_from_json(model_path, data_conf, saved_model=None,  config_path=None):
 
         start_epoch = 0
 
         assert config_path is not None, "config not provided for model"
         config = parse_config_json(config_path, data=data_conf)
-        model_conf = get_model_config(config)
+        model_confs = get_model_config(config)
 
         # check for explicitly saved model
         if saved_model is not None: 
-            model = tf.keras.models.load_model(saved_model, compile=True)
-            model.summary(line_length=88)
-            return model, model_conf, start_epoch
+            if type(saved_model) is not list: saved_model = [saved_model]
+            models = []
+            for s in saved_model:
+                model = tf.keras.models.load_model(s, compile=True)
+                model.summary(line_length=88)
+                models.append(model)
+            return models, model_confs, start_epoch
         
         # look for checkpoints in model_path
         ckpts = map(lambda x: parse.parse(MatrixFactorizer.MODEL_FORMAT, x), os.listdir(model_path))
@@ -271,13 +287,13 @@ class MatrixFactorizer(object):
             model_name = os.path.join(model_path, MatrixFactorizer.MODEL_FORMAT.format(epoch=ckpt['epoch'], val_loss=ckpt['val_loss']))
             model = tf.keras.models.load_model(model_name, compile=True)
             model.summary(line_length=88)
-            return model, model_conf, start_epoch
+            return [model], [model_conf], start_epoch
         
         # otherwise make model from scratch
         print("Initializing model from scratch")
-        model, model_conf = make_model(config)
+        models, model_confs = make_model(config)
 
-        return model, model_conf, start_epoch
+        return models, model_confs, start_epoch
     
     def make_data_iterator(self, data: ExplicitDataFromCSV, train=True):
         batchsize = self.model_conf['batchsize'] if train else 5000
@@ -338,6 +354,25 @@ class MatrixFactorizer(object):
         self.model_conf['epochs'] = tmp
         
         self.model.evaluate(validation_data.iterate())
+
+
+def transplant_weights(model_from: Model, model_to: Model):
+    
+    assert len(model_from.layers)==len(model_to.layers)
+
+    for layer_from, layer_to in zip(model_from.layers, model_to.layers):
+    
+        print("transplanting layer {:s} -> {:s} ".format(layer_from.name, layer_to.name))
+
+        weights_from = layer_from.get_weights()
+        weights_to = layer_to.get_weights()
+        assert len(weights_from) == len(weights_to)
+        for wf, wt in zip(weights_from, weights_to):
+            assert len(wf.shape) == len(wt.shape)
+            print("    transplanting weights {} -> {} ".format(wf.shape, wt.shape))
+            common_hypercube = tuple([slice(0,min(sf, st)) for sf, st in zip(wf.shape, wt.shape)])
+            wt[tuple(common_hypercube)] = wf[tuple(common_hypercube)]
+        layer_to.set_weights(weights_to)
 
 if __name__=="__main__":
 

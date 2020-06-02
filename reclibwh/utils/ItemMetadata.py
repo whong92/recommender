@@ -445,6 +445,7 @@ class ExplicitDataFromCSV(ExplicitData):
         return ratings
     
     def get_item_mean_ratings(self, items):
+        if items is None: return self.stats
         return self.stats.loc[items, ['rating_item_mean']]
 
 if __name__=="__main__":

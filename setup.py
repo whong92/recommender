@@ -24,11 +24,15 @@ setuptools.setup(
         'tqdm>=4.0.0'
         'tensorflow>=2.0.0',
         'keras>=2.3.1',
-        'matplotlib>=3.0.0'
-        'scikit-learn>=0.19.2',
+        'matplotlib>=3.0.0',
+        'scikit-learn>=0.19.0',
         'pandas>=0.23.0',
         'jinja2>=2.11.2',
-        'parse>=1.15.0'
+        'parse>=1.15.0',
+        'flask>=1.1.1',
+        'Flask-Script>=2.0.6',
+        'Flask-Cors>=3.0.8'
     ],
     python_requires='>=3.6',
+    include_package_data=True
 )

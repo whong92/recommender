@@ -1,3 +1,9 @@
+import tensorflow as tf
+
+tf.config.experimental.set_visible_devices([], 'GPU')
+my_devices = tf.config.experimental.list_physical_devices(device_type='CPU')
+tf.config.experimental.set_visible_devices(devices= my_devices, device_type='CPU')
+
 from ..recommender.recommenderALS import RecommenderALS
 from ..recommender.recommenderMF import RecommenderMFAsymCached
 from ..utils.ItemMetadata import ExplicitDataFromCSV, ExplicitDataFromSql3
@@ -9,13 +15,11 @@ import time
 import numpy as np
 
 from flask import g
-from flask import Flask, request, app, Response, jsonify
-from flask_script import Manager, Server
+from flask import Flask, Blueprint, request, app, current_app, Response, jsonify
+from flask_script import Manager, Server, Option
 from flask_cors import CORS
 
-app = Flask(__name__)
-CORS(app)
-manager = Manager(app)
+import argparse
 
 class ValidationError(Exception):
 
@@ -30,20 +34,14 @@ class RecommenderContext:
 
     def __init__(self, data_folder, model_path):
 
-        #self.rec = RecommenderALS(mode='predict', model_path=model_path)
-        self.rec = RecommenderMFAsymCached(mode='predict', model_path=model_path)
+        # self.rec = RecommenderALS(mode='predict', model_path=model_path)
+        self.rec = RecommenderMFAsymCached(model_path=model_path, mf_kwargs={'config_path': 'SVD_asym_cached.json.template'})
         self.N_offset = self.rec.config['n_users']
         self.d = ExplicitDataFromSql3(
-            '/home/ong/personal/FiML/FiML/db.sqlite3',
-            rt='backend_rating',
-            rt_user_col='user_id',
-            rt_item_fk_col='film_id',
-            rt_rating_col='rating',
-            it='backend_film', 
-            it_item_id_col='id',
-            ut='auth_user',
-            ut_id_col='id',
-            user_offset=self.N_offset
+            os.path.join(data_folder, 'db.sqlite3'),
+            rt='backend_rating', rt_user_col='user_id', rt_item_fk_col='film_id', rt_rating_col='rating',
+            it='backend_film', it_item_id_col='dataset_id', it_item_mean_col='mean_rating', ut='auth_user', ut_id_col='id',
+            user_offset=self.N_offset, normalize={'loc': 0.0, 'scale': 5.0}
         )
         self.rec.input_data(self.d)
         self.updated_users = set({}) # in memory cache of which users have and have not been trained, think of a better fix than this!
@@ -81,14 +79,16 @@ class RecommenderContext:
     def join(self):        
         self.t.shutdown()
 
-@app.route('/')
+rec_blueprint = Blueprint('rec_blueprint', __name__, template_folder='templates')
+
+@rec_blueprint.route('/')
 def say_hello():
     return 'hello world'
 
-@app.route('/user_recommend', methods=('POST',))
+@rec_blueprint.route('/user_recommend', methods=('POST',))
 def user_recommend():
     try:
-        rC = app.stuff['rec']
+        rC = current_app.stuff['rec']
         stuff = request.get_json()
         if 'users' not in stuff: raise ValidationError('list of users required')
         users = stuff['users']
@@ -107,10 +107,10 @@ def user_recommend():
     except ValidationError as e:
         return Response('fuck {}'.format(e), 400)
 
-@app.route('/user_update', methods=('POST',))
+@rec_blueprint.route('/user_update', methods=('POST',))
 def user_update():
     try:
-        rC = app.stuff['rec']
+        rC = current_app.stuff['rec']
         stuff = request.get_json()
         users = stuff['users']
         if 'users' not in stuff: raise ValidationError('list of users required')
@@ -132,22 +132,21 @@ def user_update():
     except ValidationError as e:
         return Response('fuck {}'.format(e), 400)
     
-
-data_folder = '/home/ong/personal/recommender/data/ml-20m-2'
-model_folder = '/home/ong/personal/recommender/models'
-# model_path = os.path.join(model_folder, 'ALS_2020-04-13.14-16-33')
-model_path = os.path.join(model_folder, "MF_2020-05-26.22-12-32", "ASVDC")
-
-class CustomServer(Server):
-    def __call__(self, app, *args, **kwargs):
-        app.stuff = {
-            'rec': RecommenderContext(data_folder, model_path)
-        }
-        #Hint: Here you could manipulate app
-        return Server.__call__(self, app, *args, **kwargs)
-
-# Remeber to add the command to your Manager instance
-manager.add_command('runserver', CustomServer())
+def create_app(data_folder, model_path):
+    app = Flask(__name__)
+    app.register_blueprint(rec_blueprint)
+    CORS(app)
+    app.stuff = {'rec': RecommenderContext(data_folder, model_path)}
+    return app
 
 if __name__ == "__main__":
-    manager.run()
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--data_dir", help="directory containing the sqlite3 database", required=True)
+    parser.add_argument("--model_path", help="path to the model", required=True)
+    parser.add_argument("--host", help="port", default="0.0.0.0")
+    parser.add_argument("--port", help="port", default="5000")
+    args = parser.parse_args()
+
+    app = create_app(args.data_dir, args.model_path)
+    app.run(host=args.host, port=args.port)
