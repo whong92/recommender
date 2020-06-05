@@ -4,8 +4,9 @@ tf.config.experimental.set_visible_devices([], 'GPU')
 my_devices = tf.config.experimental.list_physical_devices(device_type='CPU')
 tf.config.experimental.set_visible_devices(devices= my_devices, device_type='CPU')
 
-from ..recommender.recommenderALS import RecommenderALS
 from ..recommender.recommenderMF import RecommenderMFAsymCached
+from ..recommender.recommenderALS import RecommenderALS
+from ..recommender.recommenderEnsemble import RecommenderEnsemble
 from ..utils.ItemMetadata import ExplicitDataFromCSV, ExplicitDataFromSql3
 from threading import Thread
 from concurrent.futures import ThreadPoolExecutor
@@ -32,18 +33,34 @@ class ValidationError(Exception):
 
 class RecommenderContext:
 
-    def __init__(self, data_folder, model_path):
+    def __init__(self, data_folder, model_path_ex, model_path_im):
 
-        # self.rec = RecommenderALS(mode='predict', model_path=model_path)
-        self.rec = RecommenderMFAsymCached(model_path=model_path, mf_kwargs={'config_path': 'SVD_asym_cached.json.template'})
+        recs = []
+        datas = []
+        if model_path_im: 
+            recs.append(RecommenderALS(mode='predict',model_path=model_path_im))
+            dunorm = ExplicitDataFromSql3(
+                os.path.join(data_folder, 'db.sqlite3'),
+                rt='backend_rating', rt_user_col='user_id', rt_item_fk_col='film_id', rt_rating_col='rating',
+                it='backend_film', it_item_id_col='dataset_id', it_item_mean_col='mean_rating', ut='auth_user', ut_id_col='id',
+                user_offset=recs[-1].config['n_users'], normalize=None
+            )
+            datas.append(dunorm)
+        if model_path_ex: 
+            recs.append(RecommenderMFAsymCached(mode='predict', model_path=model_path_ex))
+            dnorm = ExplicitDataFromSql3(
+                os.path.join(data_folder, 'db.sqlite3'),
+                rt='backend_rating', rt_user_col='user_id', rt_item_fk_col='film_id', rt_rating_col='rating',
+                it='backend_film', it_item_id_col='dataset_id', it_item_mean_col='mean_rating', ut='auth_user', ut_id_col='id',
+                user_offset=recs[-1].config['n_users'], normalize={'loc': 0.0, 'scale': 5.0}
+            )
+            datas.append(dnorm)
+
+        self.rec = RecommenderEnsemble(recs)
         self.N_offset = self.rec.config['n_users']
-        self.d = ExplicitDataFromSql3(
-            os.path.join(data_folder, 'db.sqlite3'),
-            rt='backend_rating', rt_user_col='user_id', rt_item_fk_col='film_id', rt_rating_col='rating',
-            it='backend_film', it_item_id_col='dataset_id', it_item_mean_col='mean_rating', ut='auth_user', ut_id_col='id',
-            user_offset=self.N_offset, normalize={'loc': 0.0, 'scale': 5.0}
-        )
-        self.rec.input_data(self.d)
+        
+        self.d = datas[0]
+        self.rec.input_data(datas)
         self.updated_users = set({}) # in memory cache of which users have and have not been trained, think of a better fix than this!
         self.t = ThreadPoolExecutor(max_workers=1)
     
@@ -132,21 +149,22 @@ def user_update():
     except ValidationError as e:
         return Response('fuck {}'.format(e), 400)
     
-def create_app(data_folder, model_path):
+def create_app(data_folder, model_path_ex, model_path_im):
     app = Flask(__name__)
     app.register_blueprint(rec_blueprint)
     CORS(app)
-    app.stuff = {'rec': RecommenderContext(data_folder, model_path)}
+    app.stuff = {'rec': RecommenderContext(data_folder, model_path_ex, model_path_im)}
     return app
 
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--data_dir", help="directory containing the sqlite3 database", required=True)
-    parser.add_argument("--model_path", help="path to the model", required=True)
+    parser.add_argument("--model_ex", help="path to the explicit model")
+    parser.add_argument("--model_im", help="path to the implicit model")
     parser.add_argument("--host", help="port", default="0.0.0.0")
     parser.add_argument("--port", help="port", default="5000")
     args = parser.parse_args()
 
-    app = create_app(args.data_dir, args.model_path)
+    app = create_app(args.data_dir, args.model_ex, args.model_im)
     app.run(host=args.host, port=args.port)
