@@ -79,7 +79,7 @@ class RecommenderLMF(Recommender):
         LMFC.save_result(os.path.join(self.model_file, 'LMFC.csv'))
         return trace
 
-    def train_update(self, users: Optional[Iterable[int]]=None):
+    def train_update(self, users: Optional[Iterable[int]]=None, test:bool=False, **kwargs):
         if users is None:
             users = np.arange(self.data.N)
 
@@ -88,16 +88,20 @@ class RecommenderLMF(Recommender):
         # TODO: improve so not required to construct the entire dataset for an update
         Utrain, Utest = self.data.make_training_datasets(dtype='sparse')
         U = Utrain + Utest
-        auc_path = os.path.join(self.model_file, 'AUC_update.csv')
-        AUCC = AUCCallback(self.data, auc_path, users, save_fn=lambda: self.lmf.save_as_epoch('best_updated'), batchsize=100)
-        AUCC.set_model(self)
-        LMFC = LMFCallback(Utrain, Utest, U, self.config['n_users'], self.config['n_items'], users=users)
-        LMFC.set_model(self.lmf)
+        AUCC = None
+        LMFC = None
+        if test: 
+            auc_path = os.path.join(self.model_file, 'AUC_update.csv')
+            AUCC = AUCCallback(self.data, auc_path, users, save_fn=lambda: self.lmf.save_as_epoch('best_updated'), batchsize=100)
+            AUCC.set_model(self)
+            LMFC = LMFCallback(Utrain, Utest, U, self.config['n_users'], self.config['n_items'], users=users)
+            LMFC.set_model(self.lmf)
         trace = self.lmf.fit(Utrain, Utest, U, users=users, cb=[LMFC, AUCC], exclude_phase={'Y'}, epochs=3)
-        AUCC.save_result(auc_path)
-        LMFC.save_result(os.path.join(self.model_file, 'LMFC_update.csv'))
+        if test: 
+            AUCC.save_result(auc_path)
+            LMFC.save_result(os.path.join(self.model_file, 'LMFC_update.csv'))
 
-        return trace,  AUCC.AUCe
+        return trace,  AUCC.AUCe if AUCC is not None else None
 
     def save(self, path):
         self.lmf.save(os.path.join(path, 'model.h5'))

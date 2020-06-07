@@ -15,7 +15,7 @@ class Recommender:
     def train(self, *args, **kwargs):
         raise NotImplementedError
 
-    def train_update(self, users: Optional[Iterable[int]]=None):
+    def train_update(self, users: Optional[Iterable[int]]=None, **kwargs):
         raise NotImplementedError
 
     def add_users(self, num=1):

@@ -7,7 +7,7 @@ tf.config.experimental.set_visible_devices(devices= my_devices, device_type='CPU
 from ..recommender.recommenderMF import RecommenderMFAsymCached
 from ..recommender.recommenderALS import RecommenderALS
 from ..recommender.recommenderEnsemble import RecommenderEnsemble
-from ..utils.ItemMetadata import ExplicitDataFromCSV, ExplicitDataFromSql3
+from ..utils.ItemMetadata import ExplicitDataFromCSV, ExplicitDataFromPostgres, ExplicitDataFromSql3
 from threading import Thread
 from concurrent.futures import ThreadPoolExecutor
 import os
@@ -33,14 +33,14 @@ class ValidationError(Exception):
 
 class RecommenderContext:
 
-    def __init__(self, data_folder, model_path_ex, model_path_im):
+    def __init__(self, postgres_config, model_path_ex, model_path_im):
 
         recs = []
         datas = []
         if model_path_im: 
             recs.append(RecommenderALS(mode='predict',model_path=model_path_im))
-            dunorm = ExplicitDataFromSql3(
-                os.path.join(data_folder, 'db.sqlite3'),
+            dunorm = ExplicitDataFromPostgres(
+                postgres_config,
                 rt='backend_rating', rt_user_col='user_id', rt_item_fk_col='film_id', rt_rating_col='rating',
                 it='backend_film', it_item_id_col='dataset_id', it_item_mean_col='mean_rating', ut='auth_user', ut_id_col='id',
                 user_offset=recs[-1].config['n_users'], normalize=None
@@ -48,8 +48,8 @@ class RecommenderContext:
             datas.append(dunorm)
         if model_path_ex: 
             recs.append(RecommenderMFAsymCached(mode='predict', model_path=model_path_ex))
-            dnorm = ExplicitDataFromSql3(
-                os.path.join(data_folder, 'db.sqlite3'),
+            dnorm = ExplicitDataFromPostgres(
+                postgres_config,
                 rt='backend_rating', rt_user_col='user_id', rt_item_fk_col='film_id', rt_rating_col='rating',
                 it='backend_film', it_item_id_col='dataset_id', it_item_mean_col='mean_rating', ut='auth_user', ut_id_col='id',
                 user_offset=recs[-1].config['n_users'], normalize={'loc': 0.0, 'scale': 5.0}
@@ -80,7 +80,7 @@ class RecommenderContext:
             users_to_update = set(users).difference(self.updated_users)
             self.updated_users = self.updated_users.union(users_to_update)
             if len(users_to_update) > 0:
-                self.rec.train_update(list(users_to_update))
+                self.rec.train_update(list(users_to_update), test=False)
             return self.rec.recommend(list(users))
         return self.t.submit(recommend_job)
     
@@ -90,7 +90,7 @@ class RecommenderContext:
             if m_users >= self.rec.config['n_users']:
                 self.rec.add_users(m_users - self.rec.config['n_users'] + 1)
             self.updated_users = self.updated_users.union(users)
-            return self.rec.train_update(users)
+            return self.rec.train_update(users, test=False)
         return self.t.submit(update_job)
     
     def join(self):        
@@ -149,22 +149,22 @@ def user_update():
     except ValidationError as e:
         return Response('fuck {}'.format(e), 400)
     
-def create_app(data_folder, model_path_ex, model_path_im):
+def create_app(postgres_config, model_path_ex, model_path_im):
     app = Flask(__name__)
     app.register_blueprint(rec_blueprint)
     CORS(app)
-    app.stuff = {'rec': RecommenderContext(data_folder, model_path_ex, model_path_im)}
+    app.stuff = {'rec': RecommenderContext(postgres_config, model_path_ex, model_path_im)}
     return app
 
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data_dir", help="directory containing the sqlite3 database", required=True)
+    parser.add_argument("--postgres_config", help="path to postgres config", required=True)
     parser.add_argument("--model_ex", help="path to the explicit model")
     parser.add_argument("--model_im", help="path to the implicit model")
     parser.add_argument("--host", help="port", default="0.0.0.0")
     parser.add_argument("--port", help="port", default="5000")
     args = parser.parse_args()
 
-    app = create_app(args.data_dir, args.model_ex, args.model_im)
+    app = create_app(args.postgres_config, args.model_ex, args.model_im)
     app.run(host=args.host, port=args.port)

@@ -78,17 +78,20 @@ class RecommenderALS(Recommender):
         AUCC.save_result(auc_path)
         return trace, AUCC.AUCe
 
-    def train_update(self, users: Optional[Iterable[int]]=None):
+    def train_update(self, users: Optional[Iterable[int]]=None, test:bool=None, **kwargs):
         if users is None: users = np.arange(self.data.N)
         auc_path = os.path.join(self.model_file, 'AUC_update.csv')
-        AUCC = AUCCallback(self.data, auc_path, users, save_fn=lambda: self.als.save_as_epoch('best_updated'))
-        AUCC.set_model(self)
+        AUCC = None
+        if test:
+            AUCC = AUCCallback(self.data, auc_path, users, save_fn=lambda: self.estimator.save('best_updated.h5'), batchsize=100)
+            AUCC.set_model(self)
+            AUCC.on_epoch_end(-1)
         # TODO: improve so not required to construct the entire dataset for an update
         Utrain, _ = self.data.make_training_datasets(users=users, dtype='sparse')
-        print(Utrain)
+        print("recommender ALS: training on {:d} samples".format(Utrain.nnz))
         trace = self.als.train_update(Utrain, users, cb=AUCC, use_cache=True)
-        AUCC.save_result(auc_path)
-        return trace, AUCC.AUCe
+        if test: AUCC.save_result(auc_path)
+        return trace, AUCC.AUCe if AUCC is not None else None
 
     def save(self, path):
         self.als.save(path)

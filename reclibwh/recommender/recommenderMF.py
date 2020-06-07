@@ -84,7 +84,7 @@ class RecommenderMF(Recommender):
 
         return np.argsort(rhats)[:, ::-1], np.sort(rhats)[:, ::-1]
 
-    def train_update(self, users: Optional[Iterable[int]]=None):
+    def train_update(self, users: Optional[Iterable[int]]=None, **kwargs):
         raise NotImplementedError
 
     def add_users(self, num=1):
@@ -123,7 +123,7 @@ class RecommenderMFAsym(RecommenderMF):
         return {k:v for k,v in zip(['rhat', 'p', 'q'], bla)}
     
     # AsymSVD doesn't really have a notion of users, so these are fine
-    def train_update(self, users: Optional[Iterable[int]]=None):
+    def train_update(self, users: Optional[Iterable[int]]=None, **kwargs):
         pass
 
     def add_users(self, num=1):
@@ -148,23 +148,25 @@ class RecommenderMFAsymCached(RecommenderMF):
         self.estimator.import_ASVD_weights(rmfa.estimator, Utrain, self.Bi)
     
     # AsymSVD doesn't really have a notion of users, so these are fine
-    def train_update(self, users: Optional[Iterable[int]]=None):
+    def train_update(self, users: Optional[Iterable[int]]=None, test:bool=False, **kwargs):
         
         Utrain, Utest = self.data.make_training_datasets(dtype='sparse', users=users)
         U = Utrain + Utest
         if self.Bi is None: 
             self.Bi = np.array(self.data.get_item_mean_ratings(None)['rating_item_mean'])
         auc_path = os.path.join(self.model_file, 'AUC_update.csv')
-        AUCC = AUCCallback(self.data, auc_path, users, save_fn=lambda: self.estimator.save('best_updated.h5'), batchsize=100)
-        AUCC.set_model(self)
-        AUCC.on_epoch_end(-1)
+        AUCC = None
+        if test:
+            AUCC = AUCCallback(self.data, auc_path, users, save_fn=lambda: self.estimator.save('best_updated.h5'), batchsize=100)
+            AUCC.set_model(self)
+            AUCC.on_epoch_end(-1)
         self.estimator.update_users(U, self.Bi, users)
-        AUCC.on_epoch_end(0)
-        AUCC.save_result(auc_path)
+        if test:
+            AUCC.on_epoch_end(0)
+            AUCC.save_result(auc_path)
+            self.estimator.evaluate(self.data, users=users)
 
-        self.estimator.evaluate(self.data, users=users)
-
-        return AUCC.AUCe
+        return AUCC.AUCe if AUCC is not None else None
 
     def add_users(self, num=1):
         self.config['n_users'] += num

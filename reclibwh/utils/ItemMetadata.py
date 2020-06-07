@@ -7,6 +7,8 @@ import scipy.sparse as sps
 from typing import Iterable, Optional
 import sqlite3
 from collections import defaultdict
+import psycopg2
+import psycopg2.extras
 
 class ExplicitData(ABC):
     def __init__(self):
@@ -75,7 +77,7 @@ class ExplicitDataFromSql3(ExplicitData):
         data = defaultdict(list)
         for row in rows:
             cols = rows[0].keys()
-            for col,v in zip(cols, row): data[col].append(v)
+            for col,v in zip(cols, row):  data[col].append(v)
         return pd.DataFrame(data, columns=columns)
 
     def fetch_md(self, item_id):
@@ -150,12 +152,14 @@ class ExplicitDataFromSql3(ExplicitData):
 
         users = [(user - self.Noffset) for user in users]
         if users is not None:
-            cond_str = ['{rt_u}=?'.format(rt_u=rt_u)]*len(users)
+            cond_str = ['{rt_u}={sub}'.format(rt_u=rt_u, sub=self.sub)]*len(users)
             cond_str = "(" + " OR ".join(cond_str) + ")"
             cmd += ' WHERE ' + cond_str
-            rows = cur.execute(cmd, tuple(users)).fetchall()
+            cur.execute(cmd, tuple(users))
+            rows = cur.fetchall()
         else:
-            rows = cur.execute(cmd).fetchall()
+            cur.execute(cmd)
+            rows = cur.fetchall()
         
         conn.commit()
         
@@ -184,7 +188,8 @@ class ExplicitDataFromSql3(ExplicitData):
         conn = self.get_conn()
         cur = conn.cursor()
         it  = self.conf['item_table']        
-        res = cur.execute('SELECT COUNT(*) FROM {it}'.format(it=it)).fetchall()
+        cur.execute('SELECT COUNT(*) FROM {it}'.format(it=it))
+        res = cur.fetchall()
         conn.commit()
         return ExplicitDataFromSql3._sqlite_rows_2_dataframe(res, ['COUNT(*)']).iloc[0]['COUNT(*)']
 
@@ -194,11 +199,16 @@ class ExplicitDataFromSql3(ExplicitData):
         cur = conn.cursor()
         ut  = self.conf['user_table']  
         ut_id_col = self.conf['ut_id_col']
-        res = cur.execute('SELECT MAX({ut_id_col}) FROM {ut}'.format(ut_id_col=ut_id_col, ut=ut)).fetchall()
+        cur.execute('SELECT MAX({ut_id_col}) FROM {ut}'.format(ut_id_col=ut_id_col, ut=ut))
+        res = cur.fetchall()
         conn.commit()
         colname = 'MAX({ut_id_col})'.format(ut_id_col=ut_id_col)
         return ExplicitDataFromSql3._sqlite_rows_2_dataframe(res, [colname]).iloc[0][colname] + 1 + self.Noffset
     
+    @property
+    def sub(self):
+        return '?'
+
     def add_items(self, **kwargs):
         """
         Utility function for importing stuff from ExplicitDataFromCSV (or others) into ExplicitDataFromSql3
@@ -214,7 +224,7 @@ class ExplicitDataFromSql3(ExplicitData):
         it_i  = self.conf['it_item_id_col']
 
 
-        insert_str = 'INSERT INTO {it} ({it_i}, created_at, name, desc, poster, mean_rating) VALUES (?, ?, ?, ?, ?, ?) '.format(it=it, it_i=it_i)
+        insert_str = 'INSERT INTO {it} ({it_i}, created_at, name, \"desc\", poster, mean_rating) VALUES ({sub}, {sub}, {sub}, {sub}, {sub}, {sub}) '.format(it=it, it_i=it_i, sub=self.sub)
 
         cur.executemany(insert_str, [(idx, '2020-05-30 20:43:24.088110', name, desc, poster, mean_rating) for (idx, name, desc, poster, mean_rating) in zip(kwargs['item_ids'], kwargs['names'], kwargs['desc'], kwargs['poster_path'], kwargs['mean_rating'])])
         conn.commit()
@@ -233,12 +243,14 @@ class ExplicitDataFromSql3(ExplicitData):
         cond_str = ""
 
         if items is not None:
-            cond_str = ['{it_i}=?'.format(it_i=it_i)]*len(items)
+            cond_str = ['{it_i}={sub}'.format(it_i=it_i, sub=self.sub)]*len(items)
             cond_str = "(" + " OR ".join(cond_str) + ")"
             cmd += ' WHERE ' + cond_str
-            rows = cur.execute(cmd, tuple(items)).fetchall()
+            cur.execute(cmd, tuple(items))
+            rows = cur.fetchall()
         else:
-            rows = cur.execute(cmd).fetchall()
+            cur.execute(cmd)
+            rows = cur.fetchall()
         
         mean_df = ExplicitDataFromSql3._sqlite_rows_2_dataframe(rows, [it_i, it_m]).set_index([it_i])
         mean_df.rename(columns={it_m: 'rating_item_mean'}, inplace=True)
@@ -247,6 +259,44 @@ class ExplicitDataFromSql3(ExplicitData):
         if normalize is not None: mean_df['rating_item_mean'] = (mean_df['rating_item_mean']-normalize['loc'])/normalize['scale']
         return mean_df
 
+
+class ExplicitDataFromPostgres(ExplicitDataFromSql3):
+
+    def __init__(self, postgres_config: str, **kwargs):
+        with open(postgres_config, 'r') as fp: self.postgres_config = fp.read()
+        super(ExplicitDataFromPostgres, self).__init__(None, **kwargs)
+        self.conn = None
+
+    def get_conn(self):
+        if self.conn is None:
+            self.conn = psycopg2.connect(self.postgres_config, cursor_factory=psycopg2.extras.DictCursor)
+        return self.conn
+    
+    @property
+    def M(self):
+        conn = self.get_conn()
+        cur = conn.cursor()
+        it  = self.conf['item_table']        
+        cur.execute('SELECT COUNT(*) FROM {it}'.format(it=it))
+        res = cur.fetchall()
+        conn.commit()
+        return ExplicitDataFromSql3._sqlite_rows_2_dataframe(res, ['count']).iloc[0]['count']
+
+    @property
+    def N(self):
+        conn = self.get_conn()
+        cur = conn.cursor()
+        ut  = self.conf['user_table']  
+        ut_id_col = self.conf['ut_id_col']
+        cur.execute('SELECT MAX({ut_id_col}) FROM {ut}'.format(ut_id_col=ut_id_col, ut=ut))
+        res = cur.fetchall()
+        conn.commit()
+        colname = 'max'
+        return ExplicitDataFromSql3._sqlite_rows_2_dataframe(res, [colname]).iloc[0][colname] + 1 + self.Noffset
+    
+    @property
+    def sub(self):
+        return '%s'
 
 class ExplicitDataFromCSV(ExplicitData):
 

@@ -35,8 +35,8 @@ class RecommenderEnsemble(Recommender):
         # ensemble model only accepts pre-trained recommenders
         raise NotImplementedError
 
-    def train_update(self, users: Optional[Iterable[int]]=None):
-        for rec in self.recommenders: rec.train_update(users)
+    def train_update(self, users: Optional[Iterable[int]]=None, **kwargs):
+        for rec in self.recommenders: rec.train_update(users, **kwargs)
 
     def save(self, path):
         for rec in self.recommenders: rec.save(path)
