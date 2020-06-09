@@ -122,7 +122,6 @@ def get_pos_ratings(R: sps.csr_matrix, users:Iterable[int], M:int, batchsize=Non
     :param batchsize:
     :return: users, items, ratings/interactions
     """
-
     ru = R[users, :]
     l = np.max(ru.getnnz(axis=1))
     if batchsize is None:

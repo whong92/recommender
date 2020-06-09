@@ -90,15 +90,17 @@ class RecommenderMF(Recommender):
     def add_users(self, num=1):
         raise NotImplementedError
 
-    def similar_to(self, i_in):
+    def similar_to(self, i_in, avg_items=False):
+        i_in = np.array(i_in)
         p = self.predict(
             u_in=np.tile(np.array([0], dtype=np.int32), self.config['n_items']),
             i_in=np.arange(0, self.config['n_items'], dtype=np.int32))
         q_in = p['q'][i_in]
         q = p['q']
-        s = np.squeeze(cosine_similarity(q, np.expand_dims(q_in, axis=0)))
+        s = cosine_similarity(q_in, q)
+        if avg_items: s = np.mean(s, axis=0, keepdims=True)
 
-        return np.argsort(s)[::-1][1:], np.sort(s)[::-1][1:]
+        return np.argsort(s)[:,::-1], np.sort(s)[:,::-1]
     
     def evaluate(self):
         self.estimator.evaluate(self.data)
@@ -171,3 +173,15 @@ class RecommenderMFAsymCached(RecommenderMF):
     def add_users(self, num=1):
         self.config['n_users'] += num
         self.estimator._add_users(num=num)
+    
+    def similar_to(self, i_in, avg_items=False):
+        i_in = np.array(i_in)
+        p = self.predict(
+            u_in=np.tile(np.array([0], dtype=np.int32), self.config['n_items']),
+            i_in=np.arange(0, self.config['n_items'], dtype=np.int32))
+        q_in = p['p'][i_in]
+        q = p['p']
+        s = cosine_similarity(q_in, q)
+        if avg_items: s = np.mean(s, axis=0, keepdims=True)
+
+        return np.argsort(s)[:,::-1], np.sort(s)[:,::-1]

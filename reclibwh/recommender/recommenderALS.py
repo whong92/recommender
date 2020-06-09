@@ -113,20 +113,11 @@ class RecommenderALS(Recommender):
 
         return np.argsort(p)[:, ::-1], np.sort(p)[:, ::-1]
 
-    def similar_to(self, i_in):
+    def similar_to(self, i_in, avg_items=False):
+        i_in = np.array(i_in)
         y = self.als.Y[i_in]
         Y = self.als.Y
-        s = np.squeeze(cosine_similarity(Y, np.expand_dims(y, axis=0)))
+        s = cosine_similarity(y, Y)
+        if avg_items: s = np.mean(s, axis=0, keepdims=True)
 
-        return np.argsort(s)[::-1][1:], np.sort(s)[::-1][1:]
-
-    def recommend_similar_to(self, u_in, i_in, lamb=0.5):
-        assert lamb >= 0. and lamb <= 1., "lamb needs to be normalized"
-        X = self.als.X[u_in]
-        y = self.als.Y[i_in]
-        Y = self.als.Y
-        s = np.squeeze(cosine_similarity(Y, np.expand_dims(y, axis=0)))
-        p = np.matmul(X, np.transpose(Y))  # np.sum(np.multiply(X, Y), axis=1)
-        q = lamb*p + (1-lamb)*s
-
-        return np.argsort(q)[::-1], np.sort(q)[::-1]
+        return np.argsort(s)[:, ::-1], np.sort(s)[:, ::-1]

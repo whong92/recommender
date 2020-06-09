@@ -68,7 +68,7 @@ class RecommenderContext:
         ratings, _ = self.d.make_training_datasets(dtype='dense', users=users)
         return ratings
 
-    def submit_recommend_job(self, users):
+    def submit_recommend_job(self, users, items=None, lamb=0.5):
         def recommend_job():
             m_users = max(users)
             print(m_users, self.rec.config['n_users'])
@@ -81,6 +81,8 @@ class RecommenderContext:
             self.updated_users = self.updated_users.union(users_to_update)
             if len(users_to_update) > 0:
                 self.rec.train_update(list(users_to_update), test=False)
+            if items is not None:
+                return self.rec.recommend_similar_to(list(users), items, lamb=lamb)
             return self.rec.recommend(list(users))
         return self.t.submit(recommend_job)
     
@@ -111,7 +113,7 @@ def user_recommend():
         users = stuff['users']
         users = [user+rC.N_offset for user in users]
         rated_users, rated, _ = rC.get_user_ratings(users)
-        result = rC.submit_recommend_job(users)
+        result = rC.submit_recommend_job(users, items=stuff.get('items', None), lamb=stuff.get('lamb', 0.5))
         recs, dists = result.result()
         res = {}
         for user, rec, dist in zip(users, recs, dists):
@@ -133,7 +135,7 @@ def user_update():
         if 'users' not in stuff: raise ValidationError('list of users required')
         users = [user+rC.N_offset for user in users]
         update = rC.submit_update_job(users) # update
-        result = rC.submit_recommend_job(users) # recommend
+        result = rC.submit_recommend_job(users, items=stuff.get('items', None), lamb=stuff.get('lamb', 0.5)) # recommend
         update.result() # wait for update
         recs, dists = result.result() # wait for results
 

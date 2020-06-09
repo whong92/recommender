@@ -65,7 +65,7 @@ class RecommenderEnsemble(Recommender):
         return np.argsort(p)[:, ::-1], np.sort(p)[:, ::-1]
 
     def recommend_similar_to(self, u_in, i_in, lamb=0.5):
-        p = np.ones(shape=(len(i_in), self.data[0].M), dtype=float)
+        p = np.ones(shape=(len(u_in), self.data[0].M), dtype=float)
         for rec in self.recommenders:
             rec_aps, rec_ps = rec.recommend_similar_to(u_in, i_in, lamb=lamb)
             for u, (rec_ap, rec_p) in enumerate(zip(rec_aps, rec_ps)):

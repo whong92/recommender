@@ -132,11 +132,13 @@ class RecommenderLMF(Recommender):
         # return np.array(idx), np.array(phats)
         return np.argsort(phats)[:, ::-1], np.sort(phats)[:, ::-1]
 
-    def similar_to(self, i_in):
+    def similar_to(self, i_in, avg_items=False):
+        i_in = np.array(i_in)
         nu = self.config['n_users']
         ni = self.config['n_items']
         Y = self.predict(np.zeros(shape=(nu,), dtype=int), np.arange(shape=(ni,), dtype=int))['q']
         y = Y[i_in]
-        s = np.squeeze(cosine_similarity(Y, np.expand_dims(y, axis=0)))
+        s = cosine_similarity(y, Y)
+        if avg_items: s = np.mean(s, axis=0, keepdims=True)
 
-        return np.argsort(s)[::-1][1:], np.sort(s)[::-1][1:]
+        return np.argsort(s)[:,::-1], np.sort(s)[:, ::-1]
