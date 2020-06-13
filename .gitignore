@@ -1,8 +1,11 @@
 data/*
 models/*
+gcp/*
+deploy/*
 !data/READme.md
 !models/READme.md
 *.idea
 *__pycache__*
 *.pyc
 *.postgres.config
+.vscode

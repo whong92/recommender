@@ -1,0 +1,7 @@
+.vscode
+.git
+__pycache__
+.idea
+models
+data
+notebooks

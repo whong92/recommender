@@ -31,7 +31,8 @@ setuptools.setup(
         'parse>=1.15.0',
         'flask>=1.1.1',
         'Flask-Script>=2.0.6',
-        'Flask-Cors>=3.0.8'
+        'Flask-Cors>=3.0.8',
+        'psycopg2>=2.8.5'
     ],
     python_requires='>=3.6',
     include_package_data=True
