@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 import pandas as pd
-from typing import Union, Iterable, List, Callable
+from typing import Union, Iterable, List, Callable, Any
 from ..utils.utils import get_pos_ratings_padded, mean_nnz
 import scipy.sparse as sps
 import numpy as np
@@ -35,10 +35,17 @@ class BasicDFDataIter:
                 yield {k: d[s:e] for k,d in data.items()}
         return
     
+    def __len__(self):
+        return int(np.ceil(len(self.df)/self.batch_size))
+    
 class DictIterable:
 
     def __init__(self):
         self.upstream = None
+    
+    def __len__(self):
+        # call upstream until we hit a handler (chain of responsibility pattern, very handy!)
+        return len(self.upstream)
     
     def __call__(self, upstream:Iterable[dict]) -> Iterable:
         self.upstream = upstream
@@ -106,6 +113,11 @@ class SparseMatRowIterator:
     def __init__(self, row_batch_size):
         self.row_batch_size = row_batch_size
         self.S = None
+    
+    def __len__(self):
+        batch_size = self.row_batch_size
+        rows = d['rows'] if 'rows' in d else np.arange(0, S.shape[0])
+        return int(np.ceil(len(rows)/batch_size))
 
     def __call__(self, d:dict) -> Iterable:
         self.d = d
@@ -114,7 +126,6 @@ class SparseMatRowIterator:
 
     def __iter__(self) -> dict:
         
-        batch_size = self.row_batch_size
         d = self.d
         S = d['S']
         pad_val = d['pad_val']
@@ -142,6 +153,15 @@ class Rename(DictIterable):
         for d in self.upstream:
             for (j, k) in mapper.items():  d[k] = d.pop(j)
             yield d
+
+class EpochIterator(DictIterable):
+    def __init__(self, epochs: int):
+        self.epochs = epochs
+    
+    def __iter__(self) -> Any:
+        for e in range(self.epochs):
+            for d in self.upstream:
+                yield d
 
 if __name__=="__main__":
     
