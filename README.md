@@ -139,15 +139,15 @@ And is used by `reclibwh.recommender.recommenderALS`. This implementation uses t
 
 ### Example Visualization
 
-Visualization of embeddings extracted from the Movielens dataset:
+Visualization of Ego Graphs. A side effect of many of the recommendation algorithms used in this library is the ability to caluclate item-item similarity. This can be used to create and visualize relationship graphs between items using pairwise similarity. One such visualization is an ego graph, showing the relationships between items most closely related to a query item. Please check out `notebooks/ego_graph_viz.ipynb` for details on how these are created
 
-Dimensionality-reduced embedding plot showing clustering of films from the Harry Potter franchise
+Ego Graph centred around "The Godfather (I)", with a radius of 10.
 
-![alt text](notebooks/images/HarryPotter.png "Harry Potter Clustering")
+![alt text](notebooks/images/EgoGodFather.png "EgoGodFather")
 
-Loose clustering of horror genres
+Ego Graph centred around "The Big Lebowski", with a radius of 15.
 
-![alt text](notebooks/images/Horror.png "Harry Potter Clustering")
+![alt text](notebooks/images/EgoBigLebowski.png "EgoBigLebowski")
 
 ## Notes
 

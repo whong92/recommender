@@ -21,7 +21,7 @@ class RecommenderEnsemble(Recommender):
 
     def input_data(self, data: Union[Iterable[ExplicitData], ExplicitData]):
         self.data = data
-        if type(data) is ExplicitData:
+        if isinstance(data, ExplicitData):
             self.data = [data]
             for rec in self.recommenders: rec.input_data(data)
         else:
@@ -45,8 +45,9 @@ class RecommenderEnsemble(Recommender):
         return
 
     def predict(self, u_in, i_in):
-        rhats = np.ones(shape=(len(u_in)), dtype=float)
-        for rec in self.recommenders: rhats = np.multiply(rhats, rec.predict(u_in, i_in))
+        rets = []
+        for rec in self.recommenders: rets.append(rec.predict(u_in, i_in))
+        return rets
 
     def recommend(self, u_in):
         p = np.ones(shape=(len(u_in), self.data[0].M), dtype=float)

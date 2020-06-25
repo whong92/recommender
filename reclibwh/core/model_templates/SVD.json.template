@@ -43,15 +43,9 @@
         "inputs": ["P", "Q"]
     },
     {
-        "name": "combine_all",
-        "type": "combine_sum",
-        "params": null,
-        "inputs": ["combine_PQ"]
-    },
-    {
         "name": "rhat",
         "type": "activation",
         "params": {"activation": "sigmoid"},
-        "inputs": ["combine_all"]
+        "inputs": ["combine_PQ"]
     }
 ]
