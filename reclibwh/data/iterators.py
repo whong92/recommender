@@ -5,6 +5,8 @@ from ..utils.utils import get_pos_ratings_padded, mean_nnz
 import scipy.sparse as sps
 import numpy as np
 from pprint import pprint
+from reclibwh.utils.utils import get_pos_ratings, get_neg_ratings
+from ..utils.ItemMetadata import ExplicitDataFromCSV
 
 class BasicDFDataIter:
 
@@ -36,7 +38,7 @@ class BasicDFDataIter:
         return
     
     def __len__(self):
-        return int(np.ceil(len(self.df)/self.batch_size))
+        return sum([int(np.ceil(len(df)/self.batch_size)) for df in self.df])
     
 class DictIterable:
 
@@ -81,10 +83,15 @@ class Normalizer(DictIterable):
                 k: (Normalizer._normalize(self.norms[k], v) if k in self.norms else v) for k, v in d.items()
             }
 
-class GetUserItems(DictIterable):
+class UserItemsNegativeSampling(DictIterable):
+    """
+    Given an upstream iterator of users, samples positive and negative interactions
+    from the utility matrix. Right now its hardcoded to sample a similar amount of
+    negatives and positives, but this can always be changed
+    """
 
     def __init__(self, U: sps.csr_matrix):
-        super(GetUserItems, self).__init__()
+        super(UserItemsNegativeSampling, self).__init__()
         self.U = U
         Ucsc = sps.csc_matrix(U)
         self.Bi = np.reshape(np.array(mean_nnz(Ucsc, axis=0, mu=0)), newshape=(-1,))
@@ -93,11 +100,18 @@ class GetUserItems(DictIterable):
         assert self.upstream is not None
         U = self.U
         Bi = self.Bi
+        M = U.shape[1]
         for d in self.upstream:
-            u = d['user']
-            rs, ys = get_pos_ratings_padded(U, u, 0, offset_yp=1)
-            bs = Bi[ys-1]
-            e = {'user_item': ys, 'user_rating': rs, 'user_rating_bias': bs}
+            us = d['user']
+            up, yp, rp = get_pos_ratings(U, us, M)
+            uup, nup = np.unique(up, return_counts=True)
+            un, yn = get_neg_ratings(U, us, M, samples_per_user=nup)
+            rn = np.zeros(shape=un.shape, dtype=float)
+            us = np.expand_dims(np.concatenate([up, un]), axis=1)
+            ys = np.expand_dims(np.concatenate([yp, yn]), axis=1)
+            rs = np.expand_dims(np.concatenate([rp, rn]), axis=1)
+            bs = Bi[ys]
+            e = {'user': us, 'item': ys, 'rating': rs, 'rating_bias': bs}
             e.update(d)
             yield e
 
@@ -110,36 +124,102 @@ def link(iters:List[Callable]):
 
 class SparseMatRowIterator:
 
-    def __init__(self, row_batch_size):
+    def __init__(self, row_batch_size, padded=True, negative=False):
         self.row_batch_size = row_batch_size
         self.S = None
-    
+        self.padded = padded
+        self.negative = negative
+        if padded and negative: raise NotImplementedError("padded negative sampling not implemented")
+
     def __len__(self):
+        d = self.d
+        S = self.S
         batch_size = self.row_batch_size
-        rows = d['rows'] if 'rows' in d else np.arange(0, S.shape[0])
+        rows = d.get('rows')
+        if rows is None: rows = np.arange(0, S.shape[0])
         return int(np.ceil(len(rows)/batch_size))
 
     def __call__(self, d:dict) -> Iterable:
         self.d = d
         assert 'S' in d and 'pad_val' in d
+        self.S = d['S']
         return self
 
     def __iter__(self) -> dict:
-        
+
         d = self.d
         S = d['S']
+        M = S.shape[1]
         pad_val = d['pad_val']
         batch_size = self.row_batch_size
-        rows = d['rows'] if 'rows' in d else np.arange(0, S.shape[0])
+        rows = d.get('rows')
+        if rows is None: rows = np.arange(0, S.shape[0])
         num_iter = int(np.ceil(len(rows)/batch_size))
-        
+
         for i in range(num_iter):
+
             s = i*batch_size
             e = min((i+1)*batch_size, len(rows))
             row = rows[s:e]
-            val, col = get_pos_ratings_padded(S, row, pad_val, batchsize=batch_size)
-            yield {'rows': row, 'cols': col, 'val': val}
+
+            if self.padded: # TODO: negative padding not implemented yet
+                val, col = get_pos_ratings_padded(S, row, pad_val)
+            else:
+                row, col, val = get_pos_ratings(S, row, M)
+                if self.negative:
+                    rowup, nup = np.unique(row, return_counts=True)
+                    rown, coln = get_neg_ratings(S, row, M, samples_per_user=nup)
+                    valn = np.zeros(shape=rown.shape, dtype=float)
+                    row = np.concatenate([row, rown])
+                    col = np.concatenate([col, coln])
+                    val = np.concatenate([val, valn])
+                row = np.expand_dims(row, axis=1)
+                col = np.expand_dims(col, axis=1)
+                val = np.expand_dims(val, axis=1)
+            yield {'rows': row, 'cols': col, 'val': val, 'pad_val': pad_val}
+
         return
+
+class AddBias(DictIterable):
+
+    def __init__(self, U: sps.csr_matrix, item_key: str='items', pad_val: int=-1):
+        super(AddBias, self).__init__()
+        self.U = U
+        Ucsc = sps.csc_matrix(U)
+        self.Bi = np.reshape(np.array(mean_nnz(Ucsc, axis=0, mu=0)), newshape=(-1,))
+        self.item_key = item_key
+        self.pad_val = pad_val
+
+    def __iter__(self) -> (dict):
+        assert self.upstream is not None
+        Bi = self.Bi
+        for d in self.upstream:
+            cols = d[self.item_key]
+            pad_val = self.pad_val
+            assert len(cols.shape)==2
+            bias = -1*np.ones(shape=cols.shape)
+            for r in range(bias.shape[0]):
+                pad_mask = cols[r] == pad_val
+                bias[r][~pad_mask] = Bi[cols[r][~pad_mask]]
+            e = {'bias': bias}
+            e.update(d)
+            yield e
+
+class AddRatedItems(DictIterable):
+
+    def __init__(self, U: sps.csr_matrix, user_key: str='user'):
+        super(AddRatedItems, self).__init__()
+        self.U = U
+        self.user_key = user_key
+
+    def __iter__(self) -> (dict):
+        assert self.upstream is not None
+        for d in self.upstream:
+            rows = d[self.user_key]
+            rs, ys = get_pos_ratings_padded(self.U, rows, -1, offset_yp=0) # TODO: check this, don't add same rating!
+            e = {'user_rated_ratings': rs, 'user_rated_items': ys}
+            e.update(d)
+            yield e
 
 class Rename(DictIterable):
 
@@ -164,46 +244,71 @@ class EpochIterator(DictIterable):
                 yield d
 
 if __name__=="__main__":
+
+    data_folder = '/home/ong/personal/recommender/data/ml-latest-small-2'
+    d = ExplicitDataFromCSV(True, data_folder=data_folder)
+    df_train = d.get_ratings_split(0)
+    df_test = d.get_ratings_split(1)
+
+    Utrain, Utest = d.make_training_datasets(dtype='sparse')
     
-    df = pd.DataFrame({
-        'user': [1,2,3,4],
-        'item': [1,2,3,4],
-        'rating': [1.,2.,3.,4.],
-    })
-    rnorm = {'loc': 0.0, 'scale': 10.0}
-    U = sps.csr_matrix((df['rating'], (df['user'], df['item'])))
+    # df = pd.DataFrame({
+    #     'user': [0,1,1,1,2,3,4],
+    #     'item': [1,1,2,3,2,3,4],
+    #     'rating': [1.,1.,2.,3.,2.,3.,4.],
+    # })
+    # rnorm = {'loc': 0.0, 'scale': 10.0}
+    # U = sps.csr_matrix((df['rating'], (df['user'], df['item'])))
+    #
+    # it = BasicDFDataIter(2)([df])
+    # nit = Normalizer({'rating': rnorm})(it)
+    # rename = Rename({'user': 'u_in', 'item': 'i_in', 'rating': 'rhat'})(nit)
+    # mfit = XyDataIterator(ykey='rhat')(rename)
+    #
+    # for rows in it: print(rows)
+    # for rows in it: print(rows)
+    # for rows in it: print(rows)
+    #
+    # for rows in nit: print(rows)
+    # for rows in nit: print(rows)
+    # for rows in nit: print(rows)
+    #
+    # for rows in mfit: print(rows)
+    # for rows in mfit: print(rows)
+    # for rows in mfit: print(rows)
+    #
+    # it = BasicDFDataIter(2)
+    # add_rated_items = AddRatedItems(U)
+    # add_bias = AddBias(U, item_key='user_rated_items', pad_val=-1)
+    # rename = Rename({
+    #     'user': 'u_in',
+    #     'item': 'i_in',
+    #     'rating': 'rhat',
+    #     'user_rated_items': 'uj_in',
+    #     'user_rated_ratings': 'ruj_in',
+    #     'bias': 'bj_in',
+    # })
+    # nit = Normalizer({'rhat': rnorm, 'ruj_in': rnorm, 'bj_in': rnorm})
+    # mfit = XyDataIterator(ykey='rhat')
+    #
+    # for rows in link([[df], it, add_rated_items, add_bias, rename, nit, mfit]): pprint(rows)
 
-    it = BasicDFDataIter(2)([df])
-    nit = Normalizer({'rating': rnorm})(it)
-    rename = Rename({'user': 'u_in', 'item': 'i_in', 'rating': 'rhat'})(nit)
-    mfit = XyDataIterator(ykey='rhat')(rename)
+    # it = SparseMatRowIterator(2, padded=False, negative=True)
+    # add_bias = AddBias(U)
+    # add_rated_items = AddRatedItems(U)
+    # rename = Rename({'rows': 'u_in', 'cols': 'i_in', 'val': 'rhat'})
+    # nit = Normalizer({
+    #     'rating': rnorm,
+    #     'user_rating': rnorm,
+    #     'user_rating_bias': rnorm
+    # })
+    # for rows in link([{'S': U, 'pad_val': -1.}, it, add_rated_items, add_bias, rename]): pprint(rows)
 
-    for rows in it: print(rows)
-    for rows in it: print(rows)
-    for rows in it: print(rows)
+    # for x in SparseMatRowIterator(2)({'S': U, 'pad_val': -1.}): print(x)
 
-    for rows in nit: print(rows)
-    for rows in nit: print(rows)
-    for rows in nit: print(rows)
+    d = {'user': np.ones(shape=(10,), dtype=int)}
+    add_rated_items = AddRatedItems(Utrain)
+    add_bias = AddBias(Utrain, item_key='user_rated_items', pad_val=-1)
 
-    for rows in mfit: print(rows)
-    for rows in mfit: print(rows)
-    for rows in mfit: print(rows)
-
-    it = BasicDFDataIter(2)
-    nit = Normalizer({'rating': rnorm})
-    rename = Rename({'user': 'u_in', 'item': 'i_in', 'rating': 'rhat'})
-    mfit = XyDataIterator(ykey='rhat')
-    
-    for rows in link([[df], it, nit, rename, mfit]): print(rows)
-
-    it = BasicDFDataIter(2)
-    itb = GetUserItems(U)
-    nit = Normalizer({
-        'rating': rnorm, 
-        'user_rating': rnorm, 
-        'user_rating_bias': rnorm
-    })
-    for rows in link([[df], it, itb, nit]): pprint(rows)
-
-    for x in SparseMatRowIterator(2)({'S': U, 'pad_val': -1.}): print(x)
+    for row in link([[d], add_rated_items, add_bias]):
+        print(row)

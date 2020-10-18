@@ -8,7 +8,7 @@
         "lr": 0.005,
         "loss": "PMFLoss",
         "inputs": ["u_in", "i_in"],
-        "outputs": ["rhat", "P", "Q"]
+        "outputs": ["rhat", "combine_all", "P", "Q"]
     },
     {
         "name": "u_in",

@@ -161,7 +161,7 @@ def get_pos_ratings_padded(R, users, padding_val, batchsize=None, offset_yp=0, r
     if batchsize is None:
         batchsize = len(users)
     rp = np.zeros(shape=(batchsize*repeat_each, l), dtype=np.float)
-    yp = padding_val*np.ones(shape=(batchsize*repeat_each, l), dtype=np.int)
+    yp = int(padding_val)*np.ones(shape=(batchsize*repeat_each, l), dtype=np.int)
     for u, user in enumerate(users):
         rp[u*repeat_each:(u+1)*repeat_each, :ru[u].data.shape[0]] = np.repeat(np.expand_dims(ru[u].data, axis=0), repeat_each, axis=0)
         yp[u*repeat_each:(u+1)*repeat_each, :ru[u].indices.shape[0]] = np.repeat(np.expand_dims(ru[u].indices + offset_yp, axis=0), repeat_each, axis=0)
