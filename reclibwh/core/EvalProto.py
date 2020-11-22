@@ -69,7 +69,7 @@ class EvalCallback(Callback):
         self.outfile = outfile
         if os.path.exists(outfile):
             df = pd.read_csv(outfile)
-            self.metric = np.array(df['metric'])
+            self.metric = np.array(df['score'])
             self.epochs = np.array(df['epoch'])
             self.best = np.max(self.metric)
         else:

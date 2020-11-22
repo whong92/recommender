@@ -17,7 +17,7 @@ from ..utils.utils import get_pos_ratings_padded
 
 if __name__=="__main__":
 
-    data_folder = '/home/ong/personal/recommender/data/ml-latest-small-2'
+    data_folder = '/home/ong/personal/recommender/data/ml-latest-small'
     model_folder = '/home/ong/personal/recommender/models'
 
     d = ExplicitDataFromCSV(True, data_folder=data_folder, normalize={'loc': 0.0, 'scale': 5.0})

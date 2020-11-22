@@ -3,7 +3,7 @@ import numpy as np
 
 if __name__=="__main__":
     
-    data_folder = '/home/ong/personal/recommender/data/ml-20m-2'
+    data_folder = '/home/ong/personal/recommender/data/ml-20m'
 
     dcsv = ExplicitDataFromCSV(True, data_folder=data_folder)
     dsql = ExplicitDataFromSql3(
@@ -22,7 +22,7 @@ if __name__=="__main__":
     print(len(md_df.index.unique()))
     print(len(md_df))
 
-    dsql.add_items(
+    dsql.import_items(
         **{
             'item_ids': md_df.index,
             'names': md_df['title'],

@@ -1,22 +1,19 @@
-import numpy as np
 import os
 from tensorflow.keras.models import Model, load_model
 from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping, CSVLogger, TensorBoard, LambdaCallback
 import tensorflow as tf
-from ..utils.utils import get_pos_ratings_padded, mean_nnz
-import scipy.sparse as sps
-
 from datetime import datetime
 from ..utils.ItemMetadata import ExplicitDataFromCSV
 import json
 
 from .Environment import Environment, Algorithm
 from .Models import STANDARD_KERAS_SAVE_FMT, initialize_from_json, model_restore
-from ..data.iterators import EpochIterator, BasicDFDataIter, Normalizer, Rename, XyDataIterator,  SparseMatRowIterator
-from .EvalProto import EvalProto, EvalCallback, AUCEval
+from ..data.iterators import EpochIterator
+from .EvalProto import EvalCallback, AUCEval
 from .RecAlgos import SimpleMFRecAlgo
-import pandas as pd
 from ..data.PresetIterators import MF_data_iter_preset, AUC_data_iter_preset
+import argparse
+import numpy as np
 
 class KerasModelSGD(Algorithm):
 
@@ -30,6 +27,7 @@ class KerasModelSGD(Algorithm):
         self.__initialized = False
         self.__env = env
         self.__config = config
+        self.__initialize()
 
     def __save(self):
         env = self.__env
@@ -102,14 +100,16 @@ class KerasModelSGD(Algorithm):
 
         model.fit(
             EpochIterator(epochs)(train_data).__iter__(),  steps_per_epoch=steps_per_epoch, epochs=epochs,
-            validation_data=EpochIterator(epochs)(valid_data).__iter__(), 
-            validation_batch_size=validation_batch_size, validation_steps=validation_steps, 
+            validation_data=EpochIterator(epochs)(valid_data).__iter__(),
+            validation_batch_size=validation_batch_size, validation_steps=validation_steps,
             verbose=1, initial_epoch=start_epoch,
             shuffle=True,
             callbacks=callbacks
         )
+
+        res = model.evaluate(x=valid_data.__iter__(), batch_size=validation_batch_size)
         self.__env.set_state({'model': model})
-        return
+        return res
 
     def predict(self, u_in=None, i_in=None, **kwargs):
         self.__initialize()
@@ -166,45 +166,31 @@ class MatrixFactorizerEnv(Environment, KerasModelSGD, SimpleMFRecAlgo, AUCEval):
 
 if __name__=="__main__":
 
-    data_folder = '/home/ong/personal/recommender/data/ml-latest-small-2'
+    now_str = datetime.now().strftime("%Y-%m-%d.%H-%M-%S")
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--data_folder", "-d", type=str, default="data/ml-latest-small")
+    parser.add_argument("--model_folder", "-m", type=str, default="models/LMF_{:s}".format(now_str))
+    args = parser.parse_args()
+    data_folder = args.data_folder
+    save_path = args.model_folder
+
     d = ExplicitDataFromCSV(True, data_folder=data_folder)
     df_train = d.get_ratings_split(0)
     df_test = d.get_ratings_split(1)
-
     Utrain, Utest = d.make_training_datasets(dtype='sparse')
+    M = d.M
+    N = d.N
 
-    # auc_test_data = SparseMatRowIterator(10, padded=True, negative=False)(
-    #     {'S': Utrain, 'pad_val': -1., 'rows': np.arange(0, d.N, d.N // 300)})
-    # auc_train_data = SparseMatRowIterator(10, padded=True, negative=False)(
-    #     {'S': Utest, 'pad_val': -1., 'rows': np.arange(0, d.N, d.N // 300)})
-    auc_test_data = AUC_data_iter_preset(Utest)
-    auc_train_data = AUC_data_iter_preset(Utrain)
-
-    # df = pd.DataFrame({
-    #     'user': [1,2,3,4],
-    #     'item': [1,2,3,4],
-    #     'rating': [1.,2.,3.,4.],
-    # })
     rnorm = {'loc': 0.0, 'scale': 5.0}
-    # U = sps.csr_matrix((df['rating'], (df['user'], df['item'])))
-
-    # TODO: wrap in a factory function or something
-    # it = BasicDFDataIter(200)([df_train])
-    # nit = Normalizer({'rating': rnorm})(it)
-    # rename = Rename({'user': 'u_in', 'item': 'i_in', 'rating': 'rhat'})(nit)
-    # mfit = XyDataIterator(ykey='rhat')(rename)
     mfit = MF_data_iter_preset(df_train, rnorm=rnorm)
+    auc_test_data = AUC_data_iter_preset(Utest, rows=np.arange(0, d.N, d.N // 300))
+    auc_train_data = AUC_data_iter_preset(Utrain, rows=np.arange(0, d.N, d.N // 300))
 
     data = {"train_data": mfit, "valid_data": mfit, "auc_data": {'test': auc_test_data, 'train': auc_train_data}}
-    env_vars = {"save_fmt": STANDARD_KERAS_SAVE_FMT, "data_conf": {"M": d.M, "N": d.N}}
-    m = initialize_from_json(data_conf={"M": d.M, "N": d.N}, config_path="SVD.json.template")[0]
-    # algo = KerasModelSGD(epochs=5)
-    # rec = SimpleMFRecAlgo(output_key=0)
+    env_vars = {"save_fmt": STANDARD_KERAS_SAVE_FMT, "data_conf": {"M": M, "N": N}}
+    m = initialize_from_json(data_conf={"M": M, "N": N}, config_path="SVD.json.template")[0]
 
-    model_folder = '/home/ong/personal/recommender/models/test'
-    save_path = os.path.join(model_folder, "MF_{:s}".format(datetime.now().strftime("%Y-%m-%d.%H-%M-%S")))
     if not os.path.exists(save_path): os.mkdir(save_path)
-    # env = Environment(save_path, model=m, data=data, algo=algo, state=env_vars, rec=rec)
-
     mfenv = MatrixFactorizerEnv(save_path, m, data, env_vars, epochs=5, med_score=3.0)
     mfenv.fit()

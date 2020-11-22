@@ -5,18 +5,21 @@ from keras.utils import generic_utils
 from scipy import sparse as sps
 from tqdm import tqdm
 import os
-from typing import Union, Optional
+
 import json
 from tensorflow.keras.models import Model
 from .Models import STANDARD_KERAS_SAVE_FMT, initialize_from_json, model_restore
 from datetime import datetime
-from ..data.iterators import EpochIterator, Rename, XyDataIterator, SparseMatRowIterator, Normalizer
+from ..data.iterators import EpochIterator
 from .EvalProto import EvalCallback, AUCEval
-from .RecAlgos import SimpleMFRecAlgo, RecAlgo
+from .RecAlgos import SimpleMFRecAlgo
 from .Environment import Environment, Algorithm, UpdateAlgo
 from reclibwh.data.PresetIterators import ALS_data_iter_preset, AUC_data_iter_preset
+from reclibwh.utils.ItemMetadata import ExplicitDataFromCSV
 
-class ALS:
+import argparse
+
+class ALSRef:
 
     """
     reference implementation for debugging pusposes
@@ -55,6 +58,7 @@ class ALS:
         Lamb = lamb*np.eye(self.K)
         alpha = self.alpha
         Xp = X.copy()
+
 
         for u, x in enumerate(X):
             cu = C[u, :]
@@ -363,78 +367,28 @@ class ALSEnv(Environment, ALSTrainer, ALSUpdateAlgo, SimpleMFRecAlgo, AUCEval):
 
 if __name__=="__main__":
 
-    # M = 800
-    # N = 350
-    # K = 20
-    # P = 1500
-    # train_val_split = 0.8
-    #
-    # alpha = 40.
-    # lamb = 1e-06
-    # np.random.seed(42)
-    # data = np.random.randint(1, 10, size=(P,))
-    # c = np.random.randint(0, M * N, size=(P,))
-    # c = np.unique(c)
-    # data = data[:len(c)]
-    # rows = c // M
-    # cols = c % M
-    #
-    # data_train = data[:int(train_val_split * len(data))]
-    # data_test = data[int(train_val_split * len(data)):]
-    # rows_train = rows[:int(train_val_split * len(data))]
-    # rows_test = rows[int(train_val_split * len(data)):]
-    # cols_train = cols[:int(train_val_split * len(data))]
-    # cols_test = cols[int(train_val_split * len(data)):]
-    #
-    # Utrain = sps.csr_matrix((data_train, (rows_train, cols_train)), shape=(N, M), dtype=np.float64)
-    # Utest = sps.csr_matrix((data_test, (rows_test, cols_test)), shape=(N, M), dtype=np.float64)
-    #
-    # Xinit = np.random.normal(0, 1 / np.sqrt(K), size=(N, K))
-    # Yinit = np.random.normal(0, 1 / np.sqrt(K), size=(M, K))
-    # Yinit_a = np.append(Yinit, np.zeros(shape=(1, K)), axis=0)
-    # Xinit_a = np.append(Xinit, np.zeros(shape=(1, K)), axis=0)
+    now_str = datetime.now().strftime("%Y-%m-%d.%H-%M-%S")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--data_folder", "-d", type=str, default="data/ml-latest-small")
+    parser.add_argument("--model_folder", "-m", type=str, default="models/ALS_{:s}".format(now_str))
+    args = parser.parse_args()
+    data_folder = args.data_folder
+    model_folder = args.model_folder
 
-    # R = U
-    #
-    # K = 5
-    #
-    # Xinit = np.random.normal(0, 1 / np.sqrt(K), size=(N, K))
-    # Yinit = np.random.normal(0, 1 / np.sqrt(K), size=(M, K))
-    #
-    # p = R.copy().astype(np.bool).astype(np.float, copy=True)
-    # C = R.copy()
-    # C.data = 1 + 1. * C.data
-    # als = ALS(N=N, M=M, K=K)
-    # als._run_single_step(Yinit, Xinit, C, R, p)
-
-    from reclibwh.utils.ItemMetadata import ExplicitDataFromCSV
-
-    data_folder = '/home/ong/personal/recommender/data/ml-latest-small-2'
     d = ExplicitDataFromCSV(True, data_folder=data_folder)
+    # d = ExplicitDataDummy()
     Utrain, Utest = d.make_training_datasets(dtype='sparse')
 
-    M = d.M + 1
-    N = d.N + 1
+    M = d.M
+    N = d.N
 
-    model_folder = '/home/ong/personal/recommender/models/test'
-    save_path = os.path.join(model_folder, "ALS_{:s}".format(datetime.now().strftime("%Y-%m-%d.%H-%M-%S")))
+    save_path = model_folder
     if not os.path.exists(save_path): os.mkdir(save_path)
 
-    # train_data_X = SparseMatRowIterator(20, padded=True, negative=False)({'S': Utrain, 'pad_val': M})
-    # train_data_X = Rename({'rows': 'u_in', 'cols': 'i_in', 'val': 'rhat'})(train_data_X)
-    # train_data_X = XyDataIterator(ykey='rhat')(train_data_X)
-    # train_data_Y = SparseMatRowIterator(20, padded=True, negative=False)({'S': sps.csr_matrix(Utrain.T), 'pad_val': N})
-    # train_data_Y = Rename({'rows': 'u_in', 'cols': 'i_in', 'val': 'rhat'})(train_data_Y)
-    # train_data_Y = XyDataIterator(ykey='rhat')(train_data_Y)
-
-    train_data_X = ALS_data_iter_preset(Utrain, batchsize=20)
-    train_data_Y = ALS_data_iter_preset(sps.csr_matrix(Utrain.T), batchsize=20)
-
-    # auc_test_data = SparseMatRowIterator(10, padded=True, negative=False)({'S': Utest, 'pad_val': -1.})
-    # auc_train_data = SparseMatRowIterator(10, padded=True, negative=False)({'S': Utrain, 'pad_val': -1.})
-
-    auc_test_data = AUC_data_iter_preset(Utest)
-    auc_train_data = AUC_data_iter_preset(Utrain)
+    train_data_X = ALS_data_iter_preset(Utrain, batchsize=200)
+    train_data_Y = ALS_data_iter_preset(sps.csr_matrix(Utrain.T), batchsize=200)
+    auc_test_data = AUC_data_iter_preset(Utest, rows=np.arange(0, N, N // 300))
+    auc_train_data = AUC_data_iter_preset(Utrain, rows=np.arange(0, N, N // 300))
 
     data = {
         "train_data_X": train_data_X, "train_data_Y": train_data_Y,
@@ -447,42 +401,6 @@ if __name__=="__main__":
         "data": data
     }
 
-    m = initialize_from_json(data_conf={"M": M+1, "N": N+1}, config_path="ALS.json.template")
-    # m[0].get_layer("X").set_weights([Xinit_a])
-    # m[0].get_layer("Y").set_weights([Yinit_a])
-    # alst = ALSTrainer(epochs=1)
-    # rec = SimpleMFRecAlgo(output_key=0)
-    # env = Environment(save_path, m, data, alst, state=env_vars, rec=rec)
-
-    # auc_eval = AUCEval(3.0)
-    # training_callbacks = [] #[EvalCallback(auc_eval, "auc.csv", env)]
-    # env.set_state({'training_callbacks': training_callbacks})
-    # env.run_train()
-
-    # update algorithm test case
-    # update_algo = ALSUpdateAlgo()
-    # env.environment_add_object(update_algo, 'update_algo')
-
-    alsenv = ALSEnv(save_path, m, data, env_vars, epochs=3)
+    m = initialize_from_json(data_conf={"M": M + 1, "N": N + 1}, config_path="ALS.json.template")
+    alsenv = ALSEnv(save_path, m, data, env_vars, epochs=30)
     alsenv.fit()
-
-    # update first and last user
-    rows, cols, vals = sps.find(Utrain[0])
-    rows = np.concatenate([rows, np.ones(dtype=int, shape=rows.shape)*(N-1)])
-    cols = np.concatenate([cols, cols])
-    vals = np.concatenate([vals, vals])
-    Uupdate = sps.csr_matrix((vals, (rows, cols)), shape=(N,M))
-
-    print(Uupdate)
-
-    # update_data = SparseMatRowIterator(20, padded=True, negative=False)({'S': Uupdate, 'pad_val': M, 'rows': [0, N-1]})
-    # update_data = Rename({'rows': 'u_in', 'cols': 'i_in', 'val': 'rhat'})(update_data)
-    # update_data = XyDataIterator(ykey='rhat')(update_data)
-    update_data = ALS_data_iter_preset(Uupdate, rows=[0, N-1])
-
-    print(alsenv.get_state()['model'][0].get_layer('X').get_weights()[0][N-1])
-
-    alsenv.update_user(update_data)
-
-    print(alsenv.get_state()['model'][0].get_layer('X').get_weights()[0][0])
-    print(alsenv.get_state()['model'][0].get_layer('X').get_weights()[0][N-1])

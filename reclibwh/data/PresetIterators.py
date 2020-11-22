@@ -32,11 +32,17 @@ def MF_data_iter_preset(df: pd.DataFrame, rnorm=None, batchsize=200):
         XyDataIterator(ykey='rhat')
     ])
 
-def MFAsym_data_iter_preset(df: pd.DataFrame, U: sps.csr_matrix, batchsize=200, rnorm=None):
+def MFAsym_data_iter_preset(df: pd.DataFrame, U: sps.csr_matrix, batchsize=200, rnorm=None, Bi: np.array=None):
 
     it = BasicDFDataIter(batchsize)
     add_rated_items = AddRatedItems(U)
-    add_bias = AddBias(U, item_key='user_rated_items', pad_val=-1)
+    add_bias = AddBias(U, item_key='user_rated_items', pad_val=-1, Bi=Bi)
+
+    def add_1_to_user_rated_items_fn(d):
+        d['user_rated_items'] += 1
+        return d
+
+    add_1_to_user_rated_items = LambdaDictIterable(add_1_to_user_rated_items_fn)
     rename = Rename({
         'user': 'u_in',
         'item': 'i_in',
@@ -49,5 +55,5 @@ def MFAsym_data_iter_preset(df: pd.DataFrame, U: sps.csr_matrix, batchsize=200, 
     mfit = XyDataIterator(ykey='rhat')
 
     return link([
-        [df], it, add_rated_items, add_bias, rename, nit, mfit
+        [df], it, add_rated_items, add_bias, add_1_to_user_rated_items, rename, nit, mfit
     ])

@@ -1,24 +1,25 @@
 import numpy as np
 import os
-import scipy.sparse as sps
 
 from keras.utils import generic_utils
 import tensorflow as tf
 from typing import List
 from .EvalProto import EvalProto, EvalCallback, AUCEval
-import pandas as pd
 
 from sklearn.metrics import mean_squared_error, average_precision_score
 from reclibwh.utils.utils import get_pos_ratings, get_neg_ratings
 import json
 
 from datetime import datetime
-from ..data.iterators import EpochIterator, Rename, XyDataIterator, SparseMatRowIterator, Normalizer
+from ..data.iterators import EpochIterator
 from .Environment import Environment, Algorithm
-from .Models import STANDARD_KERAS_SAVE_FMT, initialize_from_json, model_restore
+from .Models import STANDARD_KERAS_SAVE_FMT, initialize_from_json
 from .Losses import PLMFLoss
 from .RecAlgos import SimpleMFRecAlgo
 from ..data.PresetIterators import AUC_data_iter_preset, LMF_data_iter_preset
+from reclibwh.utils.ItemMetadata import ExplicitDataFromCSV
+
+import argparse
 
 class LMFCEval(EvalProto):
 
@@ -290,22 +291,19 @@ class LMFEnv(Environment, LMFGD, SimpleMFRecAlgo, AUCEval):
 
 if __name__=="__main__":
 
-    from reclibwh.utils.ItemMetadata import ExplicitDataFromCSV
-    data_folder = '/home/ong/personal/recommender/data/ml-latest-small-2'
+    now_str = datetime.now().strftime("%Y-%m-%d.%H-%M-%S")
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--data_folder", "-d", type=str, default="data/ml-latest-small")
+    parser.add_argument("--model_folder", "-m", type=str, default="models/LMF_{:s}".format(now_str))
+    args = parser.parse_args()
+    data_folder = args.data_folder
+    save_path = args.model_folder
+
     d = ExplicitDataFromCSV(True, data_folder=data_folder)
     Utrain, Utest = d.make_training_datasets(dtype='sparse')
 
-    # TODO: wrap in a factory function or do this inside of Algo
-    # it = SparseMatRowIterator(2, padded=False, negative=True)({'S': Utrain, 'pad_val': -1.})
-    # rename = Rename({'rows': 'u_in', 'cols': 'i_in', 'val': 'rhat'})(it)
-    # train_mfit = XyDataIterator(ykey='rhat')(rename)
-
     train_mfit = LMF_data_iter_preset(Utrain)
-
-    # TODO: wrap in a factory function or do this inside of Algo
-    # auc_test_data = SparseMatRowIterator(10, padded=True, negative=False)({'S': Utrain, 'pad_val': -1., 'rows': np.arange(0,d.N,d.N//300)})
-    # auc_train_data = SparseMatRowIterator(10, padded=True, negative=False)({'S': Utest, 'pad_val': -1., 'rows': np.arange(0,d.N,d.N//300)})
-
     auc_test_data = AUC_data_iter_preset(Utest, rows=np.arange(0,d.N,d.N//300))
     auc_train_data = AUC_data_iter_preset(Utrain, rows=np.arange(0,d.N,d.N//300))
 
@@ -320,11 +318,8 @@ if __name__=="__main__":
         "data_conf": {"M": d.M, "N": d.N},
     }
 
-    m = initialize_from_json(data_conf={"M": d.M, "N": d.N}, config_path="SVD.json.template")[0]
-
-    model_folder = '/home/ong/personal/recommender/models/test'
-    save_path = os.path.join(model_folder, "LMF_{:s}".format(datetime.now().strftime("%Y-%m-%d.%H-%M-%S")))
+    m = initialize_from_json(data_conf={"M": d.M, "N": d.N}, config_path="SVD.json.template", config_override={"SVD_asym": {"lr": 0.1, "batchsize": 2000}})[0]
     if not os.path.exists(save_path): os.mkdir(save_path)
 
-    lmf = LMFEnv(save_path, m , data, env_vars, epochs=10)
+    lmf = LMFEnv(save_path, m, data, env_vars, epochs=30)
     lmf.fit()

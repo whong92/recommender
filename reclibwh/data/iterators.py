@@ -182,11 +182,14 @@ class SparseMatRowIterator:
 
 class AddBias(DictIterable):
 
-    def __init__(self, U: sps.csr_matrix, item_key: str='items', pad_val: int=-1):
+    def __init__(self, U: sps.csr_matrix, item_key: str='items', pad_val: int=-1, Bi=None):
         super(AddBias, self).__init__()
-        self.U = U
-        Ucsc = sps.csc_matrix(U)
-        self.Bi = np.reshape(np.array(mean_nnz(Ucsc, axis=0, mu=0)), newshape=(-1,))
+        if Bi is None: # construct Bi from U
+            self.U = U
+            Ucsc = sps.csc_matrix(U)
+            self.Bi = np.reshape(np.array(mean_nnz(Ucsc, axis=0, mu=0)), newshape=(-1,))
+        else: # Bi given
+            self.Bi = Bi
         self.item_key = item_key
         self.pad_val = pad_val
 
@@ -234,6 +237,19 @@ class Rename(DictIterable):
             for (j, k) in mapper.items():  d[k] = d.pop(j)
             yield d
 
+class LambdaDictIterable(DictIterable):
+
+    def __init__(self, fn: Callable):
+        super(LambdaDictIterable, self).__init__()
+        self.fn = fn
+
+    def __iter__(self) -> (dict, dict):
+        assert self.upstream is not None
+        fn = self.fn
+        for d in self.upstream:
+            d = fn(d)
+            yield d
+
 class EpochIterator(DictIterable):
     def __init__(self, epochs: int):
         self.epochs = epochs
@@ -242,10 +258,11 @@ class EpochIterator(DictIterable):
         for e in range(self.epochs):
             for d in self.upstream:
                 yield d
+            yield d # for some idiot reason, keras asks for an extra batch - what?!
 
 if __name__=="__main__":
 
-    data_folder = '/home/ong/personal/recommender/data/ml-latest-small-2'
+    data_folder = '/home/ong/personal/recommender/data/ml-latest-small'
     d = ExplicitDataFromCSV(True, data_folder=data_folder)
     df_train = d.get_ratings_split(0)
     df_test = d.get_ratings_split(1)

@@ -180,11 +180,13 @@ def model_restore(environment_path=None, saved_model=None, save_fmt=None) -> Opt
         if type(saved_model) is not list: saved_model = [saved_model]
         models = []
         for s in saved_model:
+            print("restoring model from saved model {:s}".format(s))
             model = tf.keras.models.load_model(s, compile=True)
             model.summary(line_length=88)
             models.append(model)
         return {'model': models, 'start_epoch': start_epoch}
 
+    # TODO: figure out how to restore multiple checkpoints, maybe pass in multiple save_fmts?
     # look for checkpoints in model_path
     ckpts = map(lambda x: parse.parse(save_fmt, x), os.listdir(environment_path))
     ckpts = list(sorted(filter(lambda x: x is not None, ckpts), key=lambda x: x['epoch'], reverse=True))
@@ -193,6 +195,7 @@ def model_restore(environment_path=None, saved_model=None, save_fmt=None) -> Opt
         start_epoch = ckpt['epoch']
         model_name = os.path.join(environment_path, save_fmt.format(epoch=ckpt['epoch'], val_loss=ckpt['val_loss']))
         model = tf.keras.models.load_model(model_name, compile=True)
+        print("restoring checkpoint from {:s}".format(model_name))
         model.summary(line_length=88)
         return {'model': [model], 'start_epoch': start_epoch}
 
@@ -200,10 +203,14 @@ def model_restore(environment_path=None, saved_model=None, save_fmt=None) -> Opt
     return None
 
 
-def initialize_from_json(data_conf=None, config_path=None):
+def initialize_from_json(data_conf=None, config_path=None, config_override=None):
 
     # otherwise make model from scratch
     print("Initializing model from scratch")
+    if not config_override: config_override = {}
     config = parse_config_json(config_path, data_conf)
+    for k, v in config_override.items():
+        for c in config:
+            if c['name'] == k: c.update(v)
     models, model_confs = make_model(config)
     return models

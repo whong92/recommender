@@ -57,7 +57,7 @@ class MFAsymRecAlgo(RecAlgo):
         nit = Normalizer({} if not norm else {'user_rated_ratings': norm, 'bias': norm})
         row = None
         for r in link([[d], add_rated_items, add_bias, nit]): row = r
-        uj_in = row['user_rated_items']
+        uj_in = row['user_rated_items'] + 1
         rj_in = row['user_rated_ratings']
         bj_in = row['bias']
 
