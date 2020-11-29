@@ -102,12 +102,14 @@ class KerasModelSGD(Algorithm):
             EpochIterator(epochs)(train_data).__iter__(),  steps_per_epoch=steps_per_epoch, epochs=epochs,
             validation_data=EpochIterator(epochs)(valid_data).__iter__(),
             validation_batch_size=validation_batch_size, validation_steps=validation_steps,
+            # train_data, validation_data=valid_data, epochs=epochs,
             verbose=1, initial_epoch=start_epoch,
             shuffle=True,
             callbacks=callbacks
         )
 
-        res = model.evaluate(x=valid_data.__iter__(), batch_size=validation_batch_size)
+        # res = model.evaluate(x=valid_data.__iter__(), batch_size=validation_batch_size)
+        res = model.evaluate(x=valid_data)
         self.__env.set_state({'model': model})
         return res
 

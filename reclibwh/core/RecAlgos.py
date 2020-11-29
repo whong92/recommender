@@ -52,7 +52,7 @@ class MFAsymRecAlgo(RecAlgo):
         i_in = np.tile(np.arange(ni), nu)
 
         d = {'user': u_in}
-        add_rated_items = AddRatedItems(U)
+        add_rated_items = AddRatedItems(U, item_key=None)
         add_bias = AddBias(U, item_key='user_rated_items', pad_val=-1)
         nit = Normalizer({} if not norm else {'user_rated_ratings': norm, 'bias': norm})
         row = None

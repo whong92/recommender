@@ -11,8 +11,7 @@ from .EvalProto import EvalProto, EvalCallback, AUCEval
 from .Environment import Algorithm, UpdateAlgo, Environment
 from .RecAlgos import MFAsymRecAlgo, SimpleMFRecAlgo
 from .MatrixFactor import KerasModelSGD
-from ..data.PresetIterators import MFAsym_data_iter_preset, AUC_data_iter_preset
-from ..utils.utils import get_pos_ratings_padded, mean_nnz
+from ..data.PresetIterators import MFAsym_data_iter_preset, AUC_data_iter_preset, MFAsym_data_tf_dataset
 import pandas as pd
 import argparse
 
@@ -109,7 +108,7 @@ class AsymSVDEnv(Environment, AsymSVDAlgo, MFAsymRecAlgo, AUCEval):
     ):
         Environment.__init__(self, path, model, data, state)
         if extra_callbacks is None: extra_callbacks = []
-        extra_callbacks += [EvalCallback(self, "eval.csv", self)]
+        # extra_callbacks += [EvalCallback(self, "eval.csv", self)]
         AsymSVDAlgo.__init__(self, self, epochs, early_stopping, tensorboard, extra_callbacks)
         MFAsymRecAlgo.__init__(self, self, self, output_key=0)
         AUCEval.__init__(self, self, self, med_score)
@@ -138,8 +137,8 @@ if __name__=="__main__":
     now_str = datetime.now().strftime("%Y-%m-%d.%H-%M-%S")
     parser = argparse.ArgumentParser()
     parser.add_argument("--data_folder", "-d", type=str, default="data/ml-latest-small")
-    parser.add_argument("--asvd_model_folder", "-asvd", type=str, default="models/test/ASVD_{:s}".format(now_str))
-    parser.add_argument("--asvdc_model_folder", "-asvdc", type=str, default="models/test/ASVDC_{:s}".format(now_str))
+    parser.add_argument("--asvd_model_folder", "-asvd", type=str, default="models/ASVD_{:s}".format(now_str))
+    parser.add_argument("--asvdc_model_folder", "-asvdc", type=str, default="models/ASVDC_{:s}".format(now_str))
     args = parser.parse_args()
     data_folder = args.data_folder
     save_path_asvd = args.asvd_model_folder
@@ -156,13 +155,15 @@ if __name__=="__main__":
     data_conf = {"M": M, "N": N, "Nranked": Nranked}
 
     rnorm = {'loc': 0.0, 'scale': 5.0}
-    data_train = MFAsym_data_iter_preset(df_train, Utrain, rnorm=rnorm)
+    data_train = MFAsym_data_tf_dataset(df_train, Utrain, rnorm=rnorm, batchsize=2000)
+    data_test = MFAsym_data_tf_dataset(df_test, Utrain, rnorm=rnorm, batchsize=2000)
+
     auc_test_data = AUC_data_iter_preset(Utest, rows=np.arange(0, N, N//300))
     auc_train_data = AUC_data_iter_preset(Utrain, rows=np.arange(0, N, N//300))
 
     data = {
         "train_data": data_train,
-        "valid_data": data_train,
+        "valid_data": data_test,
         "auc_data": {'test': auc_test_data, 'train': auc_train_data},
         "mf_asym_rec_data": {'U': Utrain, 'norm': rnorm},
     }

@@ -7,6 +7,7 @@ import numpy as np
 from pprint import pprint
 from reclibwh.utils.utils import get_pos_ratings, get_neg_ratings
 from ..utils.ItemMetadata import ExplicitDataFromCSV
+from typing import Optional
 
 class BasicDFDataIter:
 
@@ -66,6 +67,17 @@ class XyDataIterator(DictIterable):
             y = {ykey: d.pop(ykey)}
             X = d
             yield X, y
+
+class FlattenDict(DictIterable):
+
+    def __init__(self):
+        super(FlattenDict, self).__init__()
+
+    def __iter__(self) -> (dict, dict):
+        assert self.upstream is not None
+        for d in self.upstream:
+            yield tuple([v for v in d.values()])
+        return
 
 class Normalizer(DictIterable):
 
@@ -210,16 +222,30 @@ class AddBias(DictIterable):
 
 class AddRatedItems(DictIterable):
 
-    def __init__(self, U: sps.csr_matrix, user_key: str='user'):
+    def __init__(self, U: sps.csr_matrix, user_key: str='user', item_key: Optional[str]='item'):
         super(AddRatedItems, self).__init__()
         self.U = U
         self.user_key = user_key
+        self.item_key = item_key
 
     def __iter__(self) -> (dict):
         assert self.upstream is not None
         for d in self.upstream:
             rows = d[self.user_key]
-            rs, ys = get_pos_ratings_padded(self.U, rows, -1, offset_yp=0) # TODO: check this, don't add same rating!
+
+            rs, ys, counts = get_pos_ratings_padded(self.U, rows, -1, offset_yp=0, return_counts=True)
+            if self.item_key is not None:
+                cols = d[self.item_key]
+                # remove items whose scores are to be predicted!
+                nzr, nzc = np.nonzero(ys == np.expand_dims(cols, axis=1))
+                assert np.all(nzr == np.arange(len(rows))) or len(nzr)==0
+
+                if len(nzr) > 0:
+                    ys[nzr, nzc] = ys[nzr, counts - 1]
+                    ys[nzr, counts - 1] = -1
+                    rs[nzr, nzc] = rs[nzr, counts - 1]
+                    rs[nzr, counts - 1] = 0
+
             e = {'user_rated_ratings': rs, 'user_rated_items': ys}
             e.update(d)
             yield e
