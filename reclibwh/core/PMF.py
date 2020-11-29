@@ -25,13 +25,13 @@ class RegularizerInspector(Callback):
         self.batch_count = 0
         self.regularizer_layers = regularizer_layers
 
-    def on_epoch_end(self, epoch, logs):
+    def on_epoch_end(self, epoch, logs=None):
         # simple printout
         for regularizer_layer in self.regularizer_layers:
             lamb = self.model.get_layer(regularizer_layer)
             print(regularizer_layer, lamb.get_weights()[0])
     
-    def on_batch_end(self, batch, logs):
+    def on_batch_end(self, batch, logs=None):
         # log to tensorboard (if available)
         self.batch_count += 1
         for regularizer_layer in self.regularizer_layers:
@@ -58,7 +58,7 @@ class AdaptiveRegularizer(Layer):
     def build(self, input_shape):
         self.log_lambda = self.add_weight(shape=(1,), initializer=Constant(self.initial_value), trainable=True, name='log_lambda')
     
-    def call(self, x):
+    def call(self, x, **kwargs):
 
         log_lambda = self.log_lambda
         beta = self.beta

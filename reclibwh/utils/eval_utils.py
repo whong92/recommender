@@ -24,7 +24,6 @@ def compute_auc(rec, test_user, train_user):
     pos = np.isin(rec_filt, test_user)
     fp = np.nonzero(pos)[0].astype(float) - np.arange(len(test_user))  # np.cumsum((~pos).astype(np.float))
     fpr = np.cumsum(fp)[-1] / f
-
     return 1 - fpr/p
 
 def filter_train_rec(rec, user_train):

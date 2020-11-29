@@ -23,18 +23,6 @@ class ExplicitData(ABC):
         pass
 
     @abstractmethod
-    def add_user(self):
-        pass
-
-    @abstractmethod
-    def add_user_ratings(self, users, items, ratings, train=True):
-        pass
-
-    @abstractmethod
-    def pop_user_ratings(self, users, train=True):
-        pass
-
-    @abstractmethod
     def make_training_datasets(self, dtype:str='dense', ctype:np.dtype=np.int32, rtype:np.dtype=np.float64, users:Optional[Iterable[int]]=None):
         pass
 
@@ -105,31 +93,6 @@ class ExplicitDataFromSql3(ExplicitData):
         normalize = self.normalize
         if normalize is not None: ret[rt_r] = (ret[rt_r]-normalize['loc'])/normalize['scale']
         return ret
-
-    def add_user(self):
-        raise NotImplementedError
-
-    def add_user_ratings(self, users, items, ratings, train=True):
-        
-        assert not self.normalize, "cannot alter data in normalized mode. please set normalize to None"
-
-        conn = self.get_conn()
-        cur = conn.cursor()
-
-        rt  = self.conf['rating_table']
-        it  = self.conf['item_table']
-        rt_u  = self.conf['rt_user_col']
-        rt_ifk  = self.conf['rt_item_fk_col']
-        rt_r  = self.conf['rt_rating_col']
-
-        insert_str = 'INSERT INTO {rt} ({rt_ifk},{rt_r}) VALUES (?,?) '\
-            'ON CONFLICT({rt_ifk}) DO UPDATE SET {rt_r}=excluded.{rt_r}'\
-            .format(rt=rt, rt_u=rt_u, rt_ifk=rt_ifk, rt_r=rt_r)
-        cur.executemany(insert_str, [(u,i,r) for (u,i,r) in zip(users, items, ratings)])
-        conn.commit()
-
-    def pop_user_ratings(self, users, train=True):
-        raise NotImplementedError
 
     def make_training_datasets(self, dtype:str='dense', ctype:np.dtype=np.int32, rtype:np.dtype=np.float64, users:Optional[Iterable[int]]=None):
         
@@ -209,7 +172,7 @@ class ExplicitDataFromSql3(ExplicitData):
     def sub(self):
         return '?'
 
-    def add_items(self, **kwargs):
+    def import_items(self, **kwargs):
         """
         Utility function for importing stuff from ExplicitDataFromCSV (or others) into ExplicitDataFromSql3
         """
@@ -346,33 +309,13 @@ class ExplicitDataFromCSV(ExplicitData):
             self.from_raw_csv(**kwargs)
 
         self.normalize = None
-        self.set_normalize(normalize)
         return
-    
-    def set_normalize(self, normalize):
-        was_normalized = self.normalize is not None
-        self.normalize = normalize
-        if normalize:
-            if was_normalized: return
-            self.unnormalized = (self.ratings, self.stats)
-            self.ratings, self.stats = self.unnormalized[0].copy(), self.unnormalized[1].copy()
-            self.ratings.loc[:, 'rating'] = (self.ratings['rating'] - normalize['loc'])/normalize['scale']
-            self.stats.loc[:, 'rating_item_mean'] = (self.stats['rating_item_mean'] - normalize['loc'])/normalize['scale']
-        else:
-            if not was_normalized: return
-            self.ratings, self.stats = self.unnormalized
 
     def fetch_md(self, item_ids):
         return self.md_df.loc[item_ids]
 
     def get_ratings(self):
         return self.ratings
-
-    def get_cat_map_user(self):
-        return self.user_map
-
-    def get_cat_map_item(self):
-        return self.item_map
 
     @property
     def df_train(self):
@@ -393,41 +336,10 @@ class ExplicitDataFromCSV(ExplicitData):
     @property
     def Nranked(self):
         return len(self.ratings)
-    
-    def update_stats(self):
-        assert not self.normalize, "cannot calculate stats in normalized mode. please set normalize to None"
-        self.stats = ExplicitDataFromCSV.calc_rating_stats(self.ratings)
         
     def get_ratings_split(self, split):
         if split not in self.ratings.index: return pd.DataFrame({}, columns=self.ratings.columns)
         return self.ratings.loc[self.ratings.split==split]
-
-    def add_user(self):
-        assert not self.normalize, "cannot alter data in normalized mode. please set normalize to None"
-        self.user_map = self.user_map.append(
-            pd.DataFrame({'user': ['manual_add_{:d}'.format(self.N)]}, index=[self.N])
-        )
-
-    def add_user_ratings(self, users, items, ratings, train=True):
-        assert not self.normalize, "cannot alter data in normalized mode. please set normalize to None"
-        for u in users: assert u in self.user_map.index
-        update = pd.DataFrame(
-            {'user': users, 'item': items, 'rating': ratings, 'split': [int(not train)]*len(users)}
-        ).set_index(['user', 'split'], drop=False)
-        self.ratings = self.ratings.append(update)
-        return update
-
-    def pop_user_ratings(self, users, train=True):
-        assert not self.normalize, "cannot alter data in normalized mode. please set normalize to None"
-        for u in users: assert u in self.user_map.index
-        split = int(not train)
-        dropped = self.ratings.loc[[(u, split) for u in users]]
-        # need to pull out add the other split back, because drop doesn't let us drop based on two levels at once!
-        addback = self.ratings.loc[[(u, 1-split) for u in users]]
-        
-        self.ratings.drop(index=users, level=0, inplace=True, errors='ignore')
-        self.ratings = self.ratings.append(addback)
-        return dropped
 
     @staticmethod
     def sanitize_ratings(ratings_csv, item, user, rating):
@@ -465,10 +377,12 @@ class ExplicitDataFromCSV(ExplicitData):
             D_test = self.get_user_ratings(users, train=False)
         else:
             D_train, D_test = self.df_train, self.df_test
-        assert dtype in {'dense', 'sparse'}, "dtype not understood"
+        assert dtype in {'dense', 'sparse', 'df'}, "dtype not understood"
         if dtype == 'dense':
             return ExplicitDataFromCSV.make_positive_arrays(D_train, ctype, rtype), \
                    ExplicitDataFromCSV.make_positive_arrays(D_test, ctype, rtype)
+        elif dtype=='df':
+            return D_train, D_test
         elif dtype == 'sparse':
             return ExplicitDataFromCSV.make_sparse_matrices(D_train, self.N, self.M, ctype, rtype), \
                    ExplicitDataFromCSV.make_sparse_matrices(D_test, self.N, self.M, ctype, rtype)
@@ -498,7 +412,99 @@ class ExplicitDataFromCSV(ExplicitData):
         if items is None: return self.stats
         return self.stats.loc[items, ['rating_item_mean']]
 
+class ExplicitDataDummy(ExplicitData):
+
+    def __init__(self, m=10, n=20, nblocks=10):
+
+        super(ExplicitDataDummy, self).__init__()
+
+        M = m*nblocks
+        N = n*nblocks
+
+        self._M = M
+        self._N = N
+        train_val_split = 0.8
+
+
+        data = np.array([])
+        cols = np.array([])
+        rows = np.array([])
+
+        for b in range(nblocks):
+            bcols = np.arange(m*b, m*(b+1))
+            brows = np.arange(n*b, n*(b+1))
+            bcols = np.tile(bcols, (n,1)).transpose().flatten()
+            brows = np.tile(brows, (m,1)).flatten()
+            cols = np.concatenate([cols, bcols])
+            rows = np.concatenate([rows, brows])
+            data = np.concatenate([data, np.ones(shape=(m * n)) * (b%5+1)])
+
+        perm = np.random.permutation(np.arange(len(data)))
+        data = data[perm]
+        rows = rows[perm].astype(int)
+        cols = cols[perm].astype(int)
+
+        data_train = data[:int(train_val_split * len(data))]
+        data_test = data[int(train_val_split * len(data)):]
+        rows_train = rows[:int(train_val_split * len(data))]
+        rows_test = rows[int(train_val_split * len(data)):]
+        cols_train = cols[:int(train_val_split * len(data))]
+        cols_test = cols[int(train_val_split * len(data)):]
+
+        self.df_train = pd.DataFrame({'rating': data_train, 'item': cols_train, 'user': rows_train}).set_index('user', drop=False)
+        self.df_test = pd.DataFrame({'rating': data_test, 'item': cols_test, 'user': rows_test}).set_index('user', drop=False)
+
+    def fetch_md(self, item_id):
+        pass
+
+    def get_ratings(self):
+        pass
+
+    def make_training_datasets(self, dtype:str='dense', ctype:np.dtype=np.int32, rtype:np.dtype=np.float64, users:Optional[Iterable[int]]=None):
+
+        if users is not None:
+            D_train = self.get_user_ratings(users, train=False)
+            D_test = self.get_user_ratings(users, train=False)
+        else:
+            D_train, D_test = self.df_train, self.df_test
+
+        assert dtype in {'dense', 'sparse', 'df'}, "dtype not understood"
+        if dtype == 'dense':
+            return ExplicitDataFromCSV.make_positive_arrays(D_train, ctype, rtype), \
+                   ExplicitDataFromCSV.make_positive_arrays(D_test, ctype, rtype)
+        elif dtype=='df':
+            return D_train, D_test
+        elif dtype == 'sparse':
+            return ExplicitDataFromCSV.make_sparse_matrices(D_train, self.N, self.M, ctype, rtype), \
+                   ExplicitDataFromCSV.make_sparse_matrices(D_test, self.N, self.M, ctype, rtype)
+
+    def get_user_ratings(self, users, train=False):
+        if train: ratings = self.df_train
+        else: ratings = self.df_test
+        users = ratings.index.intersection(users)
+        ratings = ratings.loc[users]
+
+        return ratings
+
+    @property
+    def N(self):
+        return self._N
+
+    @property
+    def M(self):
+        return self._M
+
+    @property
+    def Nranked(self):
+        return len(self.df_train) + len(self.df_test)
+
+
 if __name__=="__main__":
+
+    df_train, df_test = ExplicitDataDummy().make_training_datasets(dtype='sparse')
+    np.set_printoptions(threshold=np.inf)
+    print(df_train.todense())
+
     """
     # example making new dataset
     ratings_csv = 'D:\\PycharmProjects\\recommender\\data\\ml-latest-small\\ratings.csv'
@@ -523,11 +529,11 @@ if __name__=="__main__":
             np.ones(shape=len(df_test,), dtype=int)
         ])
     })
-    ratings_all.reset_index(drop=True).to_csv('/home/ong/personal/recommender/data/ml-20m-2/ratings_sanitized.csv', index=False)
-    df_split.to_csv('/home/ong/personal/recommender/data/ml-20m-2/ratings_split.csv', index=False)
+    ratings_all.reset_index(drop=True).to_csv('/home/ong/personal/recommender/data/ml-20m/ratings_sanitized.csv', index=False)
+    df_split.to_csv('/home/ong/personal/recommender/data/ml-20m/ratings_split.csv', index=False)
     """
 
-    # data_dir = "/home/ong/personal/recommender/data/ml-latest-small-2"
+    # data_dir = "/home/ong/personal/recommender/data/ml-latest-small"
     # d = ExplicitDataFromCSV(True, data_folder=data_dir)
     # print(d.get_user_ratings([0]))
     # print(d.get_user_ratings([0], train=True))

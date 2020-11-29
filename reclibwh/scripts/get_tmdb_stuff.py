@@ -5,7 +5,7 @@ import pandas as pd
 import json
 from tqdm import tqdm
 
-data_folder = '/home/ong/personal/recommender/data/ml-20m-2'
+data_folder = '/home/ong/personal/recommender/data/ml-20m'
 dcsv = ExplicitDataFromCSV(True, data_folder=data_folder)
 
 links = pd.read_csv(os.path.join(data_folder, 'links.csv'))

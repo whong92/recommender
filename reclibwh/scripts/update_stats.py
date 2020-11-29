@@ -4,7 +4,7 @@ import numpy as np
 
 if __name__=="__main__":
 
-    data_folder = '/home/ong/personal/recommender/data/ml-latest-small-2'
+    data_folder = '/home/ong/personal/recommender/data/ml-latest-small'
 
     print('loading data....')
     d = ExplicitDataFromCSV(True, data_folder=data_folder)

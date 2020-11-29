@@ -5,40 +5,51 @@ from keras.utils import generic_utils
 from scipy import sparse as sps
 from tqdm import tqdm
 import os
-from keras.callbacks import Callback
-from typing import Union, Optional
-import json
-from ..utils.utils import get_pos_ratings_padded
 
-class ALS:
+import json
+from tensorflow.keras.models import Model
+from .Models import STANDARD_KERAS_SAVE_FMT, initialize_from_json, model_restore
+from datetime import datetime
+from ..data.iterators import EpochIterator
+from .EvalProto import EvalCallback, AUCEval
+from .RecAlgos import SimpleMFRecAlgo
+from .Environment import Environment, Algorithm, UpdateAlgo
+from reclibwh.data.PresetIterators import ALS_data_iter_preset, AUC_data_iter_preset
+from reclibwh.utils.ItemMetadata import ExplicitDataFromCSV
+
+import argparse
+
+class ALSRef:
+
+    """
+    reference implementation for debugging pusposes
+    """
 
     def __init__(
-            self, mode='train', N=100, M=100, K=10, lamb=1e-06, alpha=40., steps=10, model_path=None,
-            Xinit=None, Yinit=None, saved_model=None
+            self, mode='train', N=100, M=100, K=10, lamb=1e-06, alpha=40., steps=10,
+            Xinit=None, Yinit=None
     ):
+
         self.R = None #U # utility |user|x|items|, sparse, row major
         self.mode = mode
-        self.model_path = model_path
         self.M = M
         self.N = N
         self.steps = steps
         self.lamb = lamb
         self.alpha = alpha
-        if saved_model is None:
-            self.K = K
-            # dense feature matrices
-            if Xinit is not None:
-                self.X = Xinit.copy()
-            else:
-                np.random.seed(42)
-                self.X = np.random.normal(0, 1 / np.sqrt(self.K), size=(N, self.K))
-            if Yinit is not None:
-                self.Y = Yinit.copy()
-            else:
-                np.random.seed(42)
-                self.Y = np.random.normal(0, 1/np.sqrt(self.K), size=(M, self.K))
+        self.K = K
+
+        # dense feature matrices
+        if Xinit is not None:
+            self.X = Xinit.copy()
         else:
-            self.load_model(saved_model)
+            np.random.seed(42)
+            self.X = np.random.normal(0, 1 / np.sqrt(self.K), size=(N, self.K))
+        if Yinit is not None:
+            self.Y = Yinit.copy()
+        else:
+            np.random.seed(42)
+            self.Y = np.random.normal(0, 1/np.sqrt(self.K), size=(M, self.K))
 
     def _run_single_step(self, Y, X, C, R, p_float):
 
@@ -47,6 +58,7 @@ class ALS:
         Lamb = lamb*np.eye(self.K)
         alpha = self.alpha
         Xp = X.copy()
+
 
         for u, x in enumerate(X):
             cu = C[u, :]
@@ -94,11 +106,7 @@ class ALS:
         loss += lamb*(np.mean(np.linalg.norm(X, 2, axis=1)) + np.mean(np.linalg.norm(Y, 2, axis=1)))
         return loss
 
-    def train_update(self, U, users, cb:Callback=None):
-        # TODO: don't worry my love, I'll come back for you
-        raise NotImplementedError
-
-    def train(self, U, cb:Callback=None, ckpt_json:Optional[str]=None,):
+    def train(self, U):
         steps = self.steps
         assert self.mode == 'train', "cannot call when mode is not train"
         R = U
@@ -106,10 +114,8 @@ class ALS:
         C = R.copy()
         C.data = 1 + self.alpha*C.data
 
-        trace = None
         start = -1
-        if ckpt_json is not None: start, trace = self.load_ckpt_json(ckpt_json=ckpt_json)
-        if trace is None: trace = np.zeros(shape=(steps,))
+        trace = np.zeros(shape=(steps,))
 
         for i in tqdm(range(start+1,steps)):
 
@@ -119,26 +125,15 @@ class ALS:
             Yp = self._run_single_step(self.X, self.Y, C.T, R.T, p.T)
             trace[i] += np.mean(np.abs(self.Y - Yp))
             self.Y = Yp
-
-            if ckpt_json is not None: self.save_ckpt(ckpt_json, i, trace)
-
         return trace
 
     def save(self, model_path=None):
 
-        if model_path is None:
-            model_path = self.model_path
         assert model_path is not None, "model path not specified"
         if not os.path.exists(model_path):
             os.mkdir(model_path)
         np.save(os.path.join(model_path, "X.npy"), self.X)
         np.save(os.path.join(model_path, "Y.npy"), self.Y)
-
-    def save_as_epoch(self, epoch:Union[str, int]='best'):
-        model_name = 'epoch-{:03d}' if type(epoch)==int else 'epoch-{:s}'
-        save_path = os.path.join(self.model_path, model_name.format(epoch))
-        self.save(save_path)
-        return save_path
 
     def load_model(self, model_path):
         self.X = np.load(os.path.join(model_path, 'X.npy'))
@@ -148,39 +143,17 @@ class ALS:
     def load_trace(self, trace_path):
         return np.array(pd.read_csv(trace_path)['trace'])
 
-    def save_trace(self, trace):
-        save_path = os.path.join(self.model_path, 'trace.csv')
-        pd.DataFrame({
-            'epoch': list(range(len(trace))), 'trace': trace,
-        }).to_csv(save_path, index=False)
-        return save_path
-
-    def load_ckpt_json(self, ckpt_json):
-        if not os.path.exists(ckpt_json): return -1, None
-        with open(ckpt_json, 'r') as fp:
-            ckpt = json.load(fp)
-
-        assert 'model_path' in ckpt and 'epoch' in ckpt and 'trace_path' in ckpt, "model_path, epoch, and trace_path required in ckpt. found {}".format(ckpt.keys())
-        self.load_model(ckpt['model_path'])
-        trace = self.load_trace(ckpt['trace_path'])
-        return ckpt['epoch'], trace
-
-    def save_ckpt(self, ckpt_json, epoch, trace):
-        model_path = self.save_as_epoch(epoch)
-        trace_path = self.save_trace(trace)
-        with open(ckpt_json, 'w') as fp:
-            json.dump({'model_path': model_path, 'trace_path': trace_path, 'epoch': epoch}, fp, indent=4)
 
 @tf.function(experimental_relax_shapes=True)
 def als_run_regression(
         Y2: tf.Tensor, Lamb: tf.Tensor, Yp: tf.Tensor, r: tf.Tensor, alpha: tf.constant,
-        batchsize: int, k: int):
+        batchsize: tf.constant, k: tf.constant):
 
     Ypp = tf.reshape(Yp, [batchsize, -1, k])
     rp = tf.reshape(r, [batchsize, -1, 1])
 
-    c = np.float64(1.) + tf.multiply(alpha, rp)
-    p = tf.cast(tf.math.greater(rp, 0.), tf.float64)
+    c = np.float32(1.) + tf.multiply(alpha, rp)
+    p = tf.cast(tf.math.greater(rp, 0.), tf.float32)
 
     L = Y2 + tf.linalg.matmul(Ypp, alpha * tf.multiply(rp, Ypp), transpose_a=True)
     Linv = tf.linalg.inv(L + Lamb)
@@ -189,315 +162,245 @@ def als_run_regression(
 
     return X
 
+@tf.function(experimental_relax_shapes=True)
+def run_als_step(
+        X: tf.Tensor, Y: tf.Tensor, Y2: tf.Tensor, LambdaI: tf.Tensor, # parameters
+        us: tf.Tensor, ys: tf.Tensor, rs: tf.Tensor, # data
+        alpha: float
+) -> tf.Tensor:
 
-class ALSTF(ALS):
+    Yp = tf.nn.embedding_lookup(Y, ys)
+    k = tf.shape(Y)[1]
+    batchsize = tf.shape(us)[0]
 
-    def __init__(self, batchsize, *args, **kwargs):
-        self.batchsize = batchsize
-        super(ALSTF, self).__init__(*args, **kwargs)
-
-        # variables for online training
-        self.Y2Tensor = None
-        self.LambTensor = None
-        self.YTensor = None
-        self.XTensor = None
-
-    def _add_users(self, num=1):
-        self.X = np.append(self.X, np.zeros(shape=(num,self.K)), axis=0)
-        if self.XTensor is not None: # update cached tensor if exists
-            self.XTensor = tf.Variable(
-                name="X", dtype=tf.float64,
-                initial_value=np.append(self.X, np.random.normal(0, 1 / np.sqrt(self.K), size=(1, self.K)), axis=0)
-            )
-        self.N += num
-
-    def train_update(self, U, users, cb:Callback=None, use_cache=False):
-
-        if cb: cb.on_epoch_end(0) # eval before
-
-        users = np.unique(users)  # remove duplicates
-        assert np.max(users) < self.N, "new user exceeds embedding dimensions {}, X size: {:d}".\
-            format(users, self.N)
-
-        if self.YTensor is None or not use_cache:
-            Y = tf.Variable(name="Y", dtype=tf.float64,
-                            initial_value=np.append(self.Y, np.zeros(shape=(1, self.K)), axis=0))
-            if use_cache: self.YTensor = Y
-        else: Y = self.YTensor
-        if self.XTensor is None or not use_cache:
-            X = tf.Variable(name="X", dtype=tf.float64,
-                            initial_value=np.append(self.X, np.zeros(shape=(1, self.K)), axis=0))
-            if use_cache: self.XTensor = X
-        else: X = self.XTensor
-        for user in users: X[user].assign(tf.zeros([self.K], tf.float64))
-        trace = self._run_single_step(Y, X, U, users, prefix="X update", use_cache=True)
-        self.X = X.numpy()[:-1]
-        self.Y = Y.numpy()[:-1]
-
-        if cb: cb.on_epoch_end(1)  # eval after
-        return [0, trace]
-
-    def _run_single_step(self, Y: tf.Tensor, X: tf.Tensor, R: sps.csr_matrix, users:Optional[np.array]=None, prefix="", use_cache=False):
-
-        batchsize = self.batchsize
-        N = X.shape[0]-1
-        M = Y.shape[0]-1
-        k = self.K
-        lamb = self.lamb
-        alpha = self.alpha
-
-        # assert self.mode == 'train', "cannot call when mode is not train"
-
-        if users is None: users = np.arange(0,N)
-        if self.Y2Tensor is None or not use_cache:
-            Y2 = tf.reshape(tf.tensordot(tf.transpose(Y), Y, axes=1, name='Y2'), shape=[1, k, k])
-            if use_cache: self.Y2Tensor = Y2
-        else: Y2 = self.Y2Tensor
-        if self.LambTensor is None or not use_cache:
-            Lamb = tf.multiply(tf.constant(lamb, dtype=tf.float64), tf.linalg.eye(num_rows=k, batch_shape=[batchsize], dtype=tf.float64))
-            if use_cache: self.LambTensor = Lamb
-        else: Lamb = self.LambTensor
-
-        diff = tf.Variable(dtype=tf.float64, initial_value=0.)
-        batch_diff = tf.Variable(dtype=tf.float64, initial_value=0.)
-
-        progbar = generic_utils.Progbar(np.ceil(float(N)/batchsize))
-
-        for i in range(0, len(users), batchsize):
-
-            us = users[i:min(i + batchsize, N)] #np.arange(i, )
-            rs, ys = get_pos_ratings_padded(R, us, M, batchsize=batchsize)
-
-            Yp = tf.nn.embedding_lookup(Y, ys)
-
-            Xnew = als_run_regression(
-                Y2, Lamb, Yp,
-                tf.constant(rs, tf.float64), tf.constant(alpha, tf.float64),
-                tf.constant(batchsize), tf.constant(k)
-            )
-
-            us = tf.convert_to_tensor(us, dtype=tf.int32) # need to convert to tensor to index tensors
-            batch_diff.assign(tf.reduce_sum(tf.abs(tf.gather(X, us)-Xnew[:len(us)])))
-            us = tf.expand_dims(us, axis=1)
-            X.scatter_nd_update(us, Xnew[:len(us)])
-
-            diff.assign_add(batch_diff)
-            progbar.add(1, values=[(prefix + ' embedding delta', batch_diff/min(i + batchsize, N))])
-
-        return diff / tf.cast(N, dtype=tf.float64)
-
-    def train(self, U, cb:Callback=None, ckpt_json=None):
-
-        assert self.mode == 'train', "cannot call when mode is not train"
-
-        k = self.K
-        M = self.M
-        N = self.N
-        steps = self.steps
-
-        trace = None
-        start = -1
-        if ckpt_json is not None: start, trace = self.load_ckpt_json(ckpt_json=ckpt_json)
-        if trace is None: trace = np.zeros(shape=(steps,))
-
-        # padding for reasons
-        X = tf.Variable(name="X", dtype=tf.float64, initial_value=np.append(self.X, np.zeros(shape=(1,self.K)), axis=0))
-        Y = tf.Variable(name="Y", dtype=tf.float64, initial_value=np.append(self.Y, np.zeros(shape=(1,self.K)), axis=0))
-
-        Y[M].assign(tf.zeros([k], dtype=tf.float64))
-        X[N].assign(tf.zeros([k], dtype=tf.float64))
-
-        UT = sps.csr_matrix(U.T)
-
-        for i in range(start+1, steps):
-            print("step {}/{}".format(i, steps-1))
-            dX = self._run_single_step(Y, X, U, prefix="X")
-            dY = self._run_single_step(X, Y, UT, prefix="Y")
-
-            trace[i] = .5*(dX + dY)
-
-            self.X = X.numpy()[:-1] # remove padded dimension
-            self.Y = Y.numpy()[:-1]
-            if ckpt_json is not None: self.save_ckpt(ckpt_json, i, trace)
-            if cb:
-                cb.on_epoch_end(i)
-
-        self.X = X.numpy()[:-1]
-        self.Y = Y.numpy()[:-1]
-
-        pd.DataFrame({
-            'epoch': list(range(steps)), 'trace': trace,
-        }).to_csv(os.path.join(self.model_path, 'trace.csv'), index=False)
-
-        return trace
-
-@tf.function
-def run_single_step(
-    batchsize: int, N: int, M: int, k: int, alpha: int, lamb: float,
-    Y: tf.Tensor, X: tf.Tensor, diff: tf.Tensor,
-    data: tf.data.Dataset
-):
-    """
-    tf function version of the _run_single_step method in ALSTF, using tensorflow datasets
-    to iterate through the sparse matrix
-    :param batchsize:
-    :param N:
-    :param M:
-    :param k:
-    :param alpha:
-    :param lamb:
-    :param Y:
-    :param X:
-    :param diff:
-    :param data:
-    :return:
-    """
-
-    batchsize_c = tf.constant(batchsize)
-    N_c = tf.constant(N)
-
-    Y2 = tf.reshape(tf.tensordot(tf.transpose(Y), Y, axes=1, name='Y2'), shape=[1, K, K])
-    Lamb = tf.multiply(tf.constant(lamb, dtype=tf.float64),
-                       tf.linalg.eye(num_rows=K, batch_shape=[batchsize], dtype=tf.float64))
-
-    for i, (rs, ys) in tf.data.Dataset.zip(
-        (tf.data.Dataset.from_tensor_slices(tf.range(0, N, batchsize, dtype=tf.int32)),
-         data)
-    ):
-        Yp = tf.nn.embedding_lookup(Y, ys)
-
-        Xnew = als_run_regression(
-            Y2, Lamb, Yp,
-            rs, tf.constant(alpha, tf.float64),
-            tf.constant(batchsize), tf.constant(k)
-        )
-        tf.print(ys.shape)
-        if N_c < i + batchsize_c:
-            diff.assign_add(tf.reduce_sum(tf.abs(X[i:N_c] - Xnew[:N_c - i])))
-            X[i:N_c].assign(Xnew[:N_c - i])
-        else:
-            diff.assign_add(tf.reduce_sum(tf.abs(X[i:i + batchsize_c] - Xnew)))
-            X[i:i + batchsize_c].assign(Xnew)
-
-    return diff / tf.cast(N_c, dtype=tf.float64)
-
-
-####### Pure tf.function implementation with tf.datasets #######
-# empirically tested to be slower with ml-20m with in-memory sparse matrices
-
-def sparse2dataset(indices: np.array, data: np.array, N: int, M: int, batch_size: int):
-
-    ds = tf.data.Dataset.from_tensor_slices(
-        tf.sparse.reorder(
-            tf.sparse.SparseTensor(indices=indices, values=data, dense_shape=(N, M))
-        )
+    Xnew = als_run_regression(
+        Y2, LambdaI, Yp,
+        rs, tf.constant(alpha, tf.float32),
+        batchsize, k
     )
 
-    def iter_r():
-        for d in ds:
-            yield d.values
+    diff = tf.reduce_sum(tf.abs(tf.gather(X, us) - Xnew[:batchsize]))
+    us = tf.expand_dims(us, axis=1)
+    X.scatter_nd_update(us, Xnew[:batchsize])
+
+    return diff
+
+def run_als_epoch(
+        als: Model, alsc: Model,
+        Xname: str, Yname: str, Y2name: str,
+        data, alpha: float, prefix="",
+) -> tf.Tensor:
+
+    X = als.get_layer(Xname).trainable_weights[0]
+    Y = als.get_layer(Yname).trainable_weights[0]
+    Y2 = alsc.get_layer(Y2name).trainable_weights[0]
+    LambdaI = alsc.get_layer("LambdaI").trainable_weights[0]
+
+    progbar = generic_utils.Progbar(len(data))
+    N = X.shape[0]
+    diff = tf.Variable(dtype=tf.float32, initial_value=0.)
+    n = tf.Variable(dtype=tf.int32, initial_value=0)
+
+    for x, y in data:
+
+        # todo: put this in an iterator maybe
+        us = tf.convert_to_tensor(x['u_in'], dtype=tf.int32)
+        ys = tf.convert_to_tensor(x['i_in'], dtype=tf.int32)
+        rs = tf.convert_to_tensor(y['rhat'], dtype=tf.float32)
+
+        batch_size = us.shape[0]
+        n.assign_add(batch_size)
+
+        batch_diff = run_als_step(X, Y, Y2, LambdaI, us, ys, rs, alpha)
+        diff.assign_add(batch_diff)
+        progbar.add(1, values=[(prefix + ' embedding delta', diff/tf.cast(n*N, tf.float32))])
+
+        # update shenanigans
+
+    return diff/tf.cast(n*N, tf.float32)
+
+def als_update_cache(als: Model, alsc: Model, Yname, Y2name, lamb=1e-06):
+
+    Y = als.get_layer(Yname).trainable_weights[0]
+    Y2 = alsc.get_layer(Y2name).trainable_weights[0]
+    LambdaI = alsc.get_layer("LambdaI").trainable_weights[0]
+
+    k = LambdaI.shape[0]
+
+    Y2.assign(tf.reshape(tf.tensordot(tf.transpose(Y), Y, axes=1), shape=[k, k]))
+    LambdaI.assign(lamb*tf.eye(k))
+
+    return
+
+class ALSTrainer(Algorithm):
+
+    def __init__(self, env: Environment, epochs=30, alpha=40.0, lamb=1e-06, extra_callbacks=None):
+        config = {}
+        config['epochs'] = epochs
+        config['start_epoch'] = 0
+        config['alpha'] = alpha
+        config['lamb'] = lamb
+        self.__config = config
+        self.__extra_callbacks = extra_callbacks
+        self.__initialized = False
+        self.__als_model = None
+        self.__env = env
+
+    def __env_save(self):
+        state = self.__env.get_state()
+        path = state['environment_path']
+        save_fmt = state.get('save_fmt', STANDARD_KERAS_SAVE_FMT)
+        val_loss = state.get('val_loss', 0)
+        epoch = self.__config['start_epoch']
+        self.__als_model.save(os.path.join(path, save_fmt.format(epoch=epoch, val_loss=val_loss)))
+        with open(os.path.join(path, 'algorithm_config.json'), 'w') as fp: json.dump(self.__config, fp)
+
+    def __save_config_cb(self, epoch):
+        self.__config['start_epoch'] = epoch
+        self.__env_save()
+
+    def __env_restore(self):
+        state = self.__env.get_state()
+        path = state['environment_path']
+        if not os.path.exists(os.path.join(path, 'algorithm_config.json')):
+            print("algorithm config does not exist. cannot restore")
+        else:
+            with open(os.path.join(path, 'algorithm_config.json'), 'r') as fp:
+                self.__config = json.load(fp)
+        rest = model_restore(environment_path=path, saved_model=state.get('use_model'), save_fmt=state.get('save_fmt', STANDARD_KERAS_SAVE_FMT))
+        if rest:
+            state['model'] = rest['model'][0]
+            self.__config['start_epoch'] = rest['start_epoch']
+
+    def __initialize(self):
+        """
+        Initialize the algorithm state by restoring config, model etc
+        :param env:
+        :return:
+        """
+        if not self.__initialized: self.__env_restore()
+        self.__initialized = True
         return
 
-    def iter_y():
-        for d in ds:
-            yield d.indices[:,0]
+    def fit(self):
+
+        self.__initialize()
+        state = self.__env.get_state()
+        # mandatory
+        models = state['model']
+        als = models[0]
+        alsc = models[1]
+        data = state['data']
+        self.__als_model = als
+        # optional
+
+        alpha = self.__config['alpha']
+        lamb = self.__config['lamb']
+        start_epoch = self.__config['start_epoch']
+        epochs = self.__config['epochs']
+        callbacks = self.__extra_callbacks
+
+        train_data_X = data['train_data_X']
+        train_data_Y = data['train_data_Y']
+
+        for epoch in range(start_epoch, epochs):
+
+            als_update_cache(als, alsc, 'Y', 'Y2', lamb)
+            run_als_epoch(als, alsc, 'X', 'Y', 'Y2', train_data_X, alpha, prefix="X")
+
+            als_update_cache(als, alsc, 'X', 'X2', lamb)
+            run_als_epoch(als, alsc, 'Y', 'X', 'X2', train_data_Y, alpha, prefix="Y")
+
+            # self.env.set_state({'val_loss': float(epoch)})
+            for callback in callbacks: callback.on_epoch_end(epoch)
+            self.__save_config_cb(epoch)
+
+        for callback in callbacks: callback.on_train_end()
+
         return
 
-    rs = tf.data.Dataset.from_generator(iter_r, output_types=(tf.float64))
-    ys = tf.data.Dataset.from_generator(iter_y, output_types=(tf.int64))
-    rs = rs.padded_batch(batch_size=batch_size, padded_shapes=[None], padding_values=np.float64(0), drop_remainder=True)
-    ys = ys.padded_batch(batch_size=batch_size, padded_shapes=[None], padding_values=np.int64(M), drop_remainder=True)
+    def predict(self, u_in=None, i_in=None):
+        self.__initialize()
+        model = self.__env.get_state()['model'][0]
+        return model.predict({'u_in': u_in, 'i_in': i_in}, batch_size=5000)
 
-    return rs, ys
+    def __evaluate(self, data=None):
+        self.__initialize()
+        model = self.__env.get_state()['model']
+        return model.evaluate(EpochIterator(1)(data).__iter__(), batch_size=5000)
 
+class ALSUpdateAlgo(UpdateAlgo):
 
-class ALSTF_DS(ALSTF):
+    def __init__(self, env: Environment, algo: ALSTrainer):
+        self.__algo = algo
+        self.__env = env
 
-    """
-    ALS using tf dataset api, just to see if faster
-    """
+    def update_user(self, data):
 
-    def __init__(self, *args, **kwargs):
-        super(ALSTF_DS, self).__init__(*args, **kwargs)
+        state = self.__env.get_state()
+        # mandatory
+        algo_config = self.__algo._ALSTrainer__config
+        models = state['model']
+        als = models[0]
+        alsc = models[1]
+        alpha = algo_config['alpha']
 
-    def train(self, U, cb:Callback=None):
+        run_als_epoch(als, alsc, 'X', 'Y', 'Y2', data, alpha, prefix="X")
 
-        rows, cols, data = sps.find(U)
-        indices = np.zeros(shape=(len(c), 2), dtype=np.int64)
-        indices[:, 0] = rows
-        indices[:, 1] = cols
+        pass
 
-        assert self.mode == 'train', "cannot call when mode is not train"
+class ALSEnv(Environment, ALSTrainer, ALSUpdateAlgo, SimpleMFRecAlgo, AUCEval):
 
-        k = self.K
-        M = self.M
-        N = self.N
-        steps = self.steps
-        batchsize = self.batchsize
-        lamb = self.lamb
-        alpha = self.alpha
+    def __init__(
+            self, path, model, data, state,
+            epochs=30, alpha=40.0, lamb=1e-06, extra_callbacks=None,
+            med_score=3.0
+    ):
 
-        X = tf.Variable(name="X", dtype=tf.float64, initial_value=self.X)
-        Y = tf.Variable(name="Y", dtype=tf.float64, initial_value=self.Y)
-        diff = tf.Variable(dtype=tf.float64, initial_value=0.)
-
-        Y[M].assign(tf.zeros([k], dtype=tf.float64))
-        X[N].assign(tf.zeros([k], dtype=tf.float64))
-
-        trace = np.zeros(shape=(steps,))
-
-        progbar = generic_utils.Progbar(np.ceil(float(N) / batchsize))
-
-        for i in range(steps):
-            diff.assign(0.)
-
-            rs, ys = sparse2dataset(indices, data, N, M, batchsize)
-            ds = tf.data.Dataset.zip((rs, ys))
-            dX = run_single_step(batchsize, N, M, K, alpha, lamb, Y, X, diff, ds)
-
-            rs, ys = sparse2dataset(indices[:, ::-1], data, M, N, batchsize)
-            ds = tf.data.Dataset.zip((rs, ys))
-            dY = run_single_step(batchsize, M, N, K, alpha, lamb, X, Y, diff, ds)
-
-            trace[i] += .5*(dX + dY)
-            progbar.add(1, [("embedding deltas", trace[i])])
-
-            self.X = X.numpy()
-            self.Y = Y.numpy()
-            self.save(os.path.join(self.model_path, 'epoch-{:03d}'.format(i)))
-
-            if cb:
-                cb.on_epoch_end(i)
-
-        pd.DataFrame({
-            'epoch': list(range(steps)), 'trace': trace,
-        }).to_csv(os.path.join(self.model_path, 'trace.csv'), index=False)
-
-        return trace
-
-
+        Environment.__init__(self, path, model, data, state)
+        if extra_callbacks is None: extra_callbacks = []
+        extra_callbacks += [EvalCallback(self, "eval.csv", self)]
+        ALSTrainer.__init__(self, self, epochs=epochs, alpha=alpha, lamb=lamb, extra_callbacks=extra_callbacks)
+        SimpleMFRecAlgo.__init__(self, self, self, output_key=0)
+        AUCEval.__init__(self, self, self, med_score)
+        ALSUpdateAlgo.__init__(self, self, self)
 
 if __name__=="__main__":
 
-    M = 100
-    N = 50
-    P = 150
-    np.random.seed(42)
-    data = np.random.randint(1, 10, size=(P,))
-    c = np.random.randint(0, M*N, size=(P,))
-    rows = c//M
-    cols = c%M
+    now_str = datetime.now().strftime("%Y-%m-%d.%H-%M-%S")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--data_folder", "-d", type=str, default="data/ml-latest-small")
+    parser.add_argument("--model_folder", "-m", type=str, default="models/ALS_{:s}".format(now_str))
+    args = parser.parse_args()
+    data_folder = args.data_folder
+    model_folder = args.model_folder
 
-    U = sps.csr_matrix((data, (rows, cols)), shape=(N,M))
-    R = U
+    d = ExplicitDataFromCSV(True, data_folder=data_folder)
+    # d = ExplicitDataDummy()
+    Utrain, Utest = d.make_training_datasets(dtype='sparse')
 
-    K = 5
+    M = d.M
+    N = d.N
 
-    Xinit = np.random.normal(0, 1 / np.sqrt(K), size=(N, K))
-    Yinit = np.random.normal(0, 1 / np.sqrt(K), size=(M, K))
+    save_path = model_folder
+    if not os.path.exists(save_path): os.mkdir(save_path)
 
-    p = R.copy().astype(np.bool).astype(np.float, copy=True)
-    C = R.copy()
-    C.data = 1 + 1. * C.data
-    als = ALS(N=N, M=M, K=K)
-    als._run_single_step(Yinit, Xinit, C, R, p)
+    train_data_X = ALS_data_iter_preset(Utrain, batchsize=200)
+    train_data_Y = ALS_data_iter_preset(sps.csr_matrix(Utrain.T), batchsize=200)
+    auc_test_data = AUC_data_iter_preset(Utest, rows=np.arange(0, N, N // 300))
+    auc_train_data = AUC_data_iter_preset(Utrain, rows=np.arange(0, N, N // 300))
+
+    data = {
+        "train_data_X": train_data_X, "train_data_Y": train_data_Y,
+        "auc_data": {'test': auc_test_data, 'train': auc_train_data}
+    }
+
+    env_vars = {
+        "save_fmt": STANDARD_KERAS_SAVE_FMT,
+        "data_conf": {"M": M, "N": N},
+        "data": data
+    }
+
+    m = initialize_from_json(data_conf={"M": M + 1, "N": N + 1}, config_path="ALS.json.template")
+    alsenv = ALSEnv(save_path, m, data, env_vars, epochs=30)
+    alsenv.fit()
