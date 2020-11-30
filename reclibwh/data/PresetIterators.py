@@ -34,10 +34,10 @@ def MF_data_iter_preset(df: pd.DataFrame, rnorm=None, batchsize=200):
         XyDataIterator(ykey='rhat')
     ])
 
-def MFAsym_data_iter_preset(df: pd.DataFrame, U: sps.csr_matrix, batchsize=200, rnorm=None, Bi: np.array=None):
+def MFAsym_data_iter_preset(df: pd.DataFrame, U: sps.csr_matrix, batchsize=200, rnorm=None, Bi: np.array=None, remove_rated_items=True):
 
     it = BasicDFDataIter(batchsize)
-    add_rated_items = AddRatedItems(U)
+    add_rated_items = AddRatedItems(U, remove_rated_items=remove_rated_items)
     add_bias = AddBias(U, item_key='user_rated_items', pad_val=-1, Bi=Bi)
 
     def add_1_to_user_rated_items_fn(d):
@@ -73,7 +73,7 @@ def split_df_random(df: pd.DataFrame, num_split=5):
         keys = ['rating', 'item', 'user']
         yield tuple([np.array(df_split.loc[:, k]) for k in keys])
 
-def MFAsym_data_tf_dataset(df, U, rnorm, batchsize, num_workers=4):
+def MFAsym_data_tf_dataset(df, U, rnorm, batchsize, num_workers=4, buffer_size=32):
     """
     Adds a TF Dataset interleave iterator over MFAsym_data_iter_preset, to parallelize and speed up extracting
     data from the dataframe
@@ -96,7 +96,8 @@ def MFAsym_data_tf_dataset(df, U, rnorm, batchsize, num_workers=4):
             df = pd.DataFrame(df)  # re-constitute into dataframe
 
             data_train = MFAsym_data_iter_preset(df, U, rnorm=rnorm, batchsize=batchsize)
-            for d in data_train: yield d
+            for d in data_train:
+                yield d
 
         def __new__(cls, a, b, c):
 
@@ -115,7 +116,7 @@ def MFAsym_data_tf_dataset(df, U, rnorm, batchsize, num_workers=4):
     dataset = tf.data.Dataset.\
         from_generator(lambda: split_df_random(df, num_workers), output_types=(tf.float32, tf.int32, tf.int32)).\
         interleave(MFAsymIterator, cycle_length=num_workers, num_parallel_calls=num_workers, block_length=1).\
-        prefetch(8)
+        prefetch(buffer_size)
 
     class TFDatasetWrapper:
 

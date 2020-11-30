@@ -222,11 +222,12 @@ class AddBias(DictIterable):
 
 class AddRatedItems(DictIterable):
 
-    def __init__(self, U: sps.csr_matrix, user_key: str='user', item_key: Optional[str]='item'):
+    def __init__(self, U: sps.csr_matrix, user_key: str='user', item_key: Optional[str]='item', remove_rated_items=True):
         super(AddRatedItems, self).__init__()
         self.U = U
         self.user_key = user_key
         self.item_key = item_key
+        self.remove_rated_items = remove_rated_items
 
     def __iter__(self) -> (dict):
         assert self.upstream is not None
@@ -234,11 +235,11 @@ class AddRatedItems(DictIterable):
             rows = d[self.user_key]
 
             rs, ys, counts = get_pos_ratings_padded(self.U, rows, -1, offset_yp=0, return_counts=True)
-            if self.item_key is not None:
+            if self.item_key is not None and self.remove_rated_items:
                 cols = d[self.item_key]
                 # remove items whose scores are to be predicted!
                 nzr, nzc = np.nonzero(ys == np.expand_dims(cols, axis=1))
-                assert np.all(nzr == np.arange(len(rows))) or len(nzr)==0
+                assert np.all(nzr == np.arange(len(rows))) or len(nzr)==0, "{}".format(nzr)
 
                 if len(nzr) > 0:
                     ys[nzr, nzc] = ys[nzr, counts - 1]

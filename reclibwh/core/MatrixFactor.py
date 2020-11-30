@@ -109,7 +109,8 @@ class KerasModelSGD(Algorithm):
         )
 
         # res = model.evaluate(x=valid_data.__iter__(), batch_size=validation_batch_size)
-        res = model.evaluate(x=valid_data)
+        # res = model.evaluate(x=valid_data.__iter__())
+        res = {}
         self.__env.set_state({'model': model})
         return res
 

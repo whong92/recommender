@@ -14,6 +14,7 @@ from .MatrixFactor import KerasModelSGD
 from ..data.PresetIterators import MFAsym_data_iter_preset, AUC_data_iter_preset, MFAsym_data_tf_dataset
 import pandas as pd
 import argparse
+from keras.utils import generic_utils
 
 class AsymSVDAlgo(KerasModelSGD):
 
@@ -42,6 +43,7 @@ class AsymSVDCachedUpdater(UpdateAlgo):
 
         self.__initialize()
 
+        progbar = generic_utils.Progbar(len(data))
         for d in data:
 
             X, y = d
@@ -54,6 +56,7 @@ class AsymSVDCachedUpdater(UpdateAlgo):
             Q = self.__model_main.get_layer('Q').get_weights()[0]
             Q[us] = np.squeeze(Qnew)
             self.__model_main.get_layer('Q').set_weights([np.squeeze(Q)])
+            progbar.add(1)
 
 class AsymSVDCachedAlgo(Algorithm):
 
@@ -134,9 +137,10 @@ class AsymSVDCachedEnv(
 if __name__=="__main__":
 
 
-    now_str = datetime.now().strftime("%Y-%m-%d.%H-%M-%S")
+    # now_str = datetime.now().strftime("%Y-%m-%d.%H-%M-%S")
+    now_str = "2020-11-29.13-21-47"
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data_folder", "-d", type=str, default="data/ml-latest-small")
+    parser.add_argument("--data_folder", "-d", type=str, default="data/ml-20m")
     parser.add_argument("--asvd_model_folder", "-asvd", type=str, default="models/ASVD_{:s}".format(now_str))
     parser.add_argument("--asvdc_model_folder", "-asvdc", type=str, default="models/ASVDC_{:s}".format(now_str))
     args = parser.parse_args()
@@ -155,36 +159,46 @@ if __name__=="__main__":
     data_conf = {"M": M, "N": N, "Nranked": Nranked}
 
     rnorm = {'loc': 0.0, 'scale': 5.0}
-    data_train = MFAsym_data_tf_dataset(df_train, Utrain, rnorm=rnorm, batchsize=2000)
-    data_test = MFAsym_data_tf_dataset(df_test, Utrain, rnorm=rnorm, batchsize=2000)
+    data_train = MFAsym_data_iter_preset(df_train, Utrain, rnorm=rnorm, batchsize=1000)
+    data_test = MFAsym_data_iter_preset(df_test, Utrain, rnorm=rnorm, batchsize=1000)
 
-    auc_test_data = AUC_data_iter_preset(Utest, rows=np.arange(0, N, N//300))
-    auc_train_data = AUC_data_iter_preset(Utrain, rows=np.arange(0, N, N//300))
+    # data_train = MFAsym_data_tf_dataset(df_train, Utrain, rnorm=rnorm, batchsize=1000, num_workers=8)
+    # data_test = MFAsym_data_tf_dataset(df_test, Utrain, rnorm=rnorm, batchsize=1000, num_workers=4)
 
     data = {
         "train_data": data_train,
         "valid_data": data_test,
-        "auc_data": {'test': auc_test_data, 'train': auc_train_data},
+        # "auc_data": {'test': auc_test_data, 'train': auc_train_data},
         "mf_asym_rec_data": {'U': Utrain, 'norm': rnorm},
     }
     env_vars = {"save_fmt": STANDARD_KERAS_SAVE_FMT, "data_conf": data_conf}
     m = initialize_from_json(
         data_conf=data_conf, config_path="SVD_asym.json.template",
-        config_override={"SVD_asym": {"lr": 0.005, "batchsize": 2000}}
+        config_override={"SVD_asym": {"lr": 0.001}}
     )[0]
 
     if not os.path.exists(save_path_asvd): os.mkdir(save_path_asvd)
 
-    env = AsymSVDEnv(save_path_asvd, m, data, env_vars, epochs=30, med_score=3.0)
+    env = AsymSVDEnv(save_path_asvd, m, data, env_vars, epochs=10, med_score=3.0)
     r = env.fit()
     m = env['model']
+
+    auc_test_data = AUC_data_iter_preset(Utest, rows=np.arange(0, N, N//300))
+    auc_train_data = AUC_data_iter_preset(Utrain, rows=np.arange(0, N, N//300))
 
     if not os.path.exists(save_path_asvdc): os.mkdir(save_path_asvdc)
     mc = initialize_from_json(data_conf=data_conf, config_path="SVD_asym_cached.json.template")
     asvdc_data = MFAsym_data_iter_preset(
         pd.DataFrame({'user': np.arange(N), 'item':np.zeros(shape=(N,)), 'rating': np.zeros(shape=(N,))}),
-        Utrain, rnorm=rnorm
+        Utrain, rnorm=rnorm, remove_rated_items=False
     )
-    env_varsc = {'data': {'asvd': m, 'train_data': asvdc_data}, 'data_conf': data_conf}
+    env_varsc = {
+        'data': {
+            'asvd': m, 'train_data': asvdc_data,
+            "auc_data": {'test': auc_test_data, 'train': auc_train_data},
+        },
+        'data_conf': data_conf
+    }
     envc = AsymSVDCachedEnv(save_path_asvdc, mc, data, env_varsc)
     envc.fit()
+    envc.evaluate()
