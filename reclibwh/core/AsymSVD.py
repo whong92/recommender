@@ -15,6 +15,7 @@ from ..data.PresetIterators import MFAsym_data_iter_preset, AUC_data_iter_preset
 import pandas as pd
 import argparse
 from keras.utils import generic_utils
+import tensorflow as tf
 
 class AsymSVDAlgo(KerasModelSGD):
 
@@ -68,17 +69,36 @@ class AsymSVDCachedAlgo(Algorithm):
         self.__model_main = None
         self.__model_X = None
         self.__updater = updater
+        self.__model_X_name = 'model_X.{epoch:03d}-{val_loss:.2f}.h5'.format(epoch=0, val_loss=0)
+        self.__model_main_name = 'model_main.{epoch:03d}-{val_loss:.2f}.h5'.format(epoch=0, val_loss=0)
+        self.initialized = False
 
     def initialize(self):
+
+        if self.initialized: return
         self.__model_X, self.__model_main = self.__env['model']
+        state = self.__env.get_state()
+        path = state['environment_path']
+
+        if os.path.exists(os.path.join(path, self.__model_X_name)) and os.path.exists(os.path.join(path, self.__model_main_name)):
+            self.__env_restore()
+            self.__env.set_state({'model': (self.__model_X, self.__model_main)})
+
+        self.initialized = True
 
     def __env_save(self):
-        # TODO
-        pass
+        state = self.__env.get_state()
+        path = state['environment_path']
+        self.__model_X.save(os.path.join(path, self.__model_X_name))
+        self.__model_main.save(os.path.join(path, self.__model_main_name))
 
     def __env_restore(self):
-        # TODO
-        pass
+        state = self.__env.get_state()
+        path = state['environment_path']
+        self.__model_X = tf.keras.models.load_model(os.path.join(path, self.__model_X_name), compile=True)
+        self.__model_main = tf.keras.models.load_model(os.path.join(path, self.__model_main_name), compile=True)
+        self.__model_X.summary()
+        self.__model_main.summary()
 
     def predict(self, u_in=None, i_in=None):
         self.initialize()
@@ -102,6 +122,7 @@ class AsymSVDCachedAlgo(Algorithm):
         asvd = self.__env['data']['asvd']
         train_data = self.__env['data']['train_data']
         self._import_ASVD_weights(asvd, train_data)
+        self.__env_save()
 
 class AsymSVDEnv(Environment, AsymSVDAlgo, MFAsymRecAlgo, AUCEval):
 

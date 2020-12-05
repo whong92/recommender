@@ -1,13 +1,6 @@
 import pandas as pd
 import numpy as np
-from keras.callbacks import Callback
-from .ItemMetadata import ExplicitDataFromCSV
-from reclibwh.recommender.recommenderInterface import Recommender
-from reclibwh.utils.utils import get_pos_ratings
-from keras.utils import generic_utils
 import tensorflow as tf
-from typing import Callable, Any, Union, Iterable
-import os
 
 def compute_auc(rec, test_user, train_user):
 
@@ -36,59 +29,3 @@ def filter_train_rec(rec, user_train):
 def tf_sort_scores(scores: tf.Tensor, axis: int):
     idx = tf.argsort(scores, axis=axis)
     return idx, tf.gather(scores, idx)
-
-def eval_model(model: Recommender, data: ExplicitDataFromCSV, batchsize:int=10, M:Union[int, Iterable[int]]=100):
-
-    if type(M) is int:
-        M = np.arange(0,M,dtype=int)
-
-    AUC = -np.ones(shape=(len(M),))
-    progbar = generic_utils.Progbar(len(M))
-
-    Utrain, Utest = data.make_training_datasets(dtype='sparse', users=M)
-    median = 3.0 if not data.normalize else 0.5
-
-    for m in range(0,len(M),batchsize):
-        t = min(len(M), m + batchsize)
-        recs = model.recommend(M[m:t])[0]
-        for i, rec in enumerate(recs):
-            _, df_train, _ = get_pos_ratings(Utrain, [M[m+i]], data.M)
-            _, df_test, r_test = get_pos_ratings(Utest, [M[m + i]], data.M)
-            df_test_rel = df_test[r_test>median]
-            auc = compute_auc(rec, df_test_rel, df_train)
-            if auc < 0: continue
-            AUC[m+i] = auc
-        progbar.add(len(recs), values=[('AUC', np.mean(AUC[m:t][AUC[m:t]>=0]))])
-
-    return AUC
-
-class AUCCallback(Callback):
-
-    def __init__(self, data: ExplicitDataFromCSV, outfile:str, M:Union[int, Iterable[int]]=100, batchsize:int=10, save_fn:Callable=None):
-        super(AUCCallback, self).__init__()
-        self.data = data
-        self.M = M
-        self.batchsize=batchsize
-        self.save_fn = save_fn
-        self.outfile = outfile
-        if os.path.exists(outfile):
-            df = pd.read_csv(outfile)
-            self.AUCe = np.array(df['AUC'])
-            self.epochs = np.array(df['epoch'])
-            self.best_AUC = np.max(self.AUCe)
-        else:
-            self.best_AUC = 0.
-            self.AUCe = np.array([])
-            self.epochs = np.array([])
-
-    def on_epoch_end(self, epoch, logs=None):
-        AUC = eval_model(self.model, self.data, M=self.M, batchsize=self.batchsize)
-        self.AUCe = np.append(self.AUCe, np.mean(AUC[AUC>-1]))
-        self.epochs = np.append(self.epochs, epoch)
-        if self.AUCe[-1] >= self.best_AUC and self.save_fn is not None:
-            self.save_fn()
-            self.best_AUC = self.AUCe[-1]
-        self.save_result(self.outfile)
-
-    def save_result(self, outfile):
-        pd.DataFrame({'epoch': self.epochs, 'AUC': self.AUCe}).to_csv(outfile, index=False)
