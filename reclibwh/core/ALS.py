@@ -260,16 +260,24 @@ class ALSTrainer(Algorithm):
         self.__env_save()
 
     def __env_restore(self):
+
         state = self.__env.get_state()
         path = state['environment_path']
+
         if not os.path.exists(os.path.join(path, 'algorithm_config.json')):
             print("algorithm config does not exist. cannot restore")
         else:
             with open(os.path.join(path, 'algorithm_config.json'), 'r') as fp:
                 self.__config = json.load(fp)
         rest = model_restore(environment_path=path, saved_model=state.get('use_model'), save_fmt=state.get('save_fmt', STANDARD_KERAS_SAVE_FMT))
+
         if rest:
-            state['model'] = rest['model'][0]
+            alsc = state['model'][1]
+            als = rest['model'][0]
+            lamb = self.__config['lamb']
+            als_update_cache(als, alsc, 'Y', 'Y2', lamb)
+            state['model'][0] = als
+            state['model'][1] = alsc
             self.__config['start_epoch'] = rest['start_epoch']
 
     def __initialize(self):

@@ -34,6 +34,9 @@ class ExplicitData(ABC):
     def M(self):
         pass
 
+    def get_item_mean_ratings(self, items):
+        return
+
 class ExplicitDataFromSql3(ExplicitData):
 
     # TODO: put all of this shit in a config
@@ -409,7 +412,7 @@ class ExplicitDataFromCSV(ExplicitData):
         return ratings
     
     def get_item_mean_ratings(self, items):
-        if items is None: return self.stats
+        if items is None: return self.stats.loc[:, 'rating_item_mean']
         return self.stats.loc[items, ['rating_item_mean']]
 
 class ExplicitDataDummy(ExplicitData):
@@ -497,6 +500,10 @@ class ExplicitDataDummy(ExplicitData):
     @property
     def Nranked(self):
         return len(self.df_train) + len(self.df_test)
+
+    def get_item_mean_ratings(self, items):
+        # TODO
+        raise NotImplementedError
 
 
 if __name__=="__main__":
