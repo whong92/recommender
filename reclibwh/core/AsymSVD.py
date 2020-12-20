@@ -158,8 +158,7 @@ class AsymSVDCachedEnv(
 if __name__=="__main__":
 
 
-    # now_str = datetime.now().strftime("%Y-%m-%d.%H-%M-%S")
-    now_str = "2020-11-29.13-21-47"
+    now_str = datetime.now().strftime("%Y-%m-%d.%H-%M-%S")
     parser = argparse.ArgumentParser()
     parser.add_argument("--data_folder", "-d", type=str, default="data/ml-20m")
     parser.add_argument("--asvd_model_folder", "-asvd", type=str, default="models/ASVD_{:s}".format(now_str))
@@ -204,8 +203,13 @@ if __name__=="__main__":
     r = env.fit()
     m = env['model']
 
-    auc_test_data = AUC_data_iter_preset(Utest, rows=np.arange(0, N, N//300))
-    auc_train_data = AUC_data_iter_preset(Utrain, rows=np.arange(0, N, N//300))
+    max_num_ratings = 50
+    num_ratings = Utrain.getnnz(axis=1)
+    users_to_test = np.nonzero(num_ratings < max_num_ratings)[0]
+    users_to_test = users_to_test[np.arange(0, len(users_to_test), max(len(users_to_test) // 300, 1))]
+
+    auc_test_data = AUC_data_iter_preset(Utest, rows=users_to_test)
+    auc_train_data = AUC_data_iter_preset(Utrain, rows=users_to_test)
 
     if not os.path.exists(save_path_asvdc): os.mkdir(save_path_asvdc)
     mc = initialize_from_json(data_conf=data_conf, config_path="SVD_asym_cached.json.template")

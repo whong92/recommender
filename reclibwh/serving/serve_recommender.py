@@ -30,7 +30,7 @@ rec_blueprint = Blueprint('rec_blueprint', __name__, template_folder='templates'
 def say_hello():
     return 'hello world'
 
-@rec_blueprint.route('/user_recommend', methods=('POST',))
+@rec_blueprint.route('/update_and_recommend', methods=('POST',))
 def user_update_and_recommend():
     try:
         rc = current_app.stuff['rec_context']

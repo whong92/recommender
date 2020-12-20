@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from .Environment import EvalProto, Algorithm, Environment
 from .RecAlgos import RecAlgo
-from ..utils.eval_utils import compute_auc
+from ..utils.eval_utils import compute_ap
 from keras.utils import generic_utils
 import numpy as np
 import os
@@ -19,15 +19,17 @@ class AUCEval(EvalProto):
     algorithm available
     """
 
-    def __init__(self, env, rec: RecAlgo, med_score):
+    def __init__(self, env, rec: RecAlgo, med_score, lim=200):
         self.__env = env
         self.__med_score = med_score
         self.__rec = rec
+        self.__lim = lim
 
     def evaluate(self):
 
         rec = self.__rec
         data = self.__env.get_state()['data']['auc_data']
+        lim = self.__lim
         train_data, test_data = data['train'], data['test']
         N = len(train_data)*train_data.row_batch_size
         AUC = -np.ones(shape=(N,))
@@ -43,11 +45,13 @@ class AUCEval(EvalProto):
 
             for i, items in enumerate(recs):
 
-                i_test_rel = i_test[i][i_test[i] != pad_val]
-                i_test_rel = i_test_rel[i_test_rel >= self.__med_score]
+                rel_mask = i_test[i] != pad_val
+                i_test_rel = i_test[i][rel_mask]
+                r_test_rel = r_test[i][rel_mask]
+                i_test_rel = i_test_rel[r_test_rel > self.__med_score]
                 i_train_rel = i_train[i][i_train[i] != pad_val]
 
-                auc = compute_auc(items, i_test_rel, i_train_rel)
+                auc = compute_ap(items[:lim], i_test_rel, i_train_rel)
                 if auc < 0: continue
                 AUC[m+i] = auc
 

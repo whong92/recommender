@@ -197,7 +197,7 @@ def run_als_epoch(
     LambdaI = alsc.get_layer("LambdaI").trainable_weights[0]
 
     progbar = generic_utils.Progbar(len(data))
-    N = X.shape[0]
+    k = X.shape[1]
     diff = tf.Variable(dtype=tf.float32, initial_value=0.)
     n = tf.Variable(dtype=tf.int32, initial_value=0)
 
@@ -213,11 +213,11 @@ def run_als_epoch(
 
         batch_diff = run_als_step(X, Y, Y2, LambdaI, us, ys, rs, alpha)
         diff.assign_add(batch_diff)
-        progbar.add(1, values=[(prefix + ' embedding delta', diff/tf.cast(n*N, tf.float32))])
+        progbar.add(1, values=[(prefix + ' embedding delta', batch_diff/tf.cast(batch_size*k, tf.float32))])
 
         # update shenanigans
 
-    return diff/tf.cast(n*N, tf.float32)
+    return diff/tf.cast(n*k, tf.float32)
 
 def als_update_cache(als: Model, alsc: Model, Yname, Y2name, lamb=1e-06):
 
@@ -231,6 +231,22 @@ def als_update_cache(als: Model, alsc: Model, Yname, Y2name, lamb=1e-06):
     LambdaI.assign(lamb*tf.eye(k))
 
     return
+
+def als_initizalize(als: Model, random_seed=42):
+
+    X = als.get_layer('X').trainable_weights[0]
+    Y = als.get_layer('X').trainable_weights[0]
+    N, K = X.shape
+    M, K = Y.shape
+
+    np.random.seed(random_seed)
+    Xinit = np.random.normal(0, 1 / np.sqrt(K), size=(N, K))
+    Yinit = np.random.normal(0, 1 / np.sqrt(K), size=(M, K))
+    Xinit = np.append(Xinit, np.zeros(shape=(1, K)), axis=0)
+    Yinit = np.append(Yinit, np.zeros(shape=(1, K)), axis=0)
+
+    als.get_layer('X').set_weights([Xinit])
+    als.get_layer('Y').set_weights([Yinit])
 
 class ALSTrainer(Algorithm):
 
@@ -311,6 +327,8 @@ class ALSTrainer(Algorithm):
         train_data_X = data['train_data_X']
         train_data_Y = data['train_data_Y']
 
+        als_initizalize(als)
+
         for epoch in range(start_epoch, epochs):
 
             als_update_cache(als, alsc, 'Y', 'Y2', lamb)
@@ -390,13 +408,19 @@ if __name__=="__main__":
     M = d.M
     N = d.N
 
-    save_path = model_folder
-    if not os.path.exists(save_path): os.mkdir(save_path)
-
     train_data_X = ALS_data_iter_preset(Utrain, batchsize=200)
     train_data_Y = ALS_data_iter_preset(sps.csr_matrix(Utrain.T), batchsize=200)
-    auc_test_data = AUC_data_iter_preset(Utest, rows=np.arange(0, N, N // 300))
-    auc_train_data = AUC_data_iter_preset(Utrain, rows=np.arange(0, N, N // 300))
+
+    max_num_ratings = 50
+    num_ratings = Utrain.getnnz(axis=1)
+    users_to_test = np.nonzero(num_ratings < max_num_ratings)[0]
+    users_to_test = users_to_test[np.arange(0, len(users_to_test), max(len(users_to_test) // 300, 1))]
+
+    auc_test_data = AUC_data_iter_preset(Utest, rows=users_to_test)
+    auc_train_data = AUC_data_iter_preset(Utrain, rows=users_to_test)
+
+    save_path = model_folder
+    if not os.path.exists(save_path): os.mkdir(save_path)
 
     data = {
         "train_data_X": train_data_X, "train_data_Y": train_data_Y,
@@ -410,5 +434,5 @@ if __name__=="__main__":
     }
 
     m = initialize_from_json(data_conf={"M": M + 1, "N": N + 1}, config_path="ALS.json.template")
-    alsenv = ALSEnv(save_path, m, data, env_vars, epochs=30)
+    alsenv = ALSEnv(save_path, m, data, env_vars, epochs=15, lamb=0.01)
     alsenv.fit()

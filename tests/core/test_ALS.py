@@ -5,7 +5,7 @@ import numpy as np
 from reclibwh.core.ALS import ALSEnv, ALSRef, run_als_step
 import scipy.sparse as sps
 from reclibwh.data.PresetIterators import ALS_data_iter_preset, AUC_data_iter_preset
-from reclibwh.utils.testutils import refresh_dir
+from reclibwh.utils.test_utils import refresh_dir
 import tensorflow as tf
 
 class TestALS(unittest.TestCase):
@@ -50,8 +50,7 @@ class TestALS(unittest.TestCase):
             rs = tf.convert_to_tensor(y['rhat'], dtype=tf.float32)
             diff = run_als_step(X, Y, Y2, LambdaI, us, ys, rs, alpha)
 
-        print(X.numpy(), Xnew)
-        # self.assertTrue(np.allclose(X.numpy(), Xnew))
+        self.assertTrue(np.allclose(X.numpy(), Xnew))
 
     def test_als(self):
 

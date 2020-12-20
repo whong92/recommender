@@ -7,7 +7,7 @@ setuptools.setup(
     name="reclibwh", # Replace with your own username
     version="0.0.1",
     author="Ong Wai Hong",
-    author_email="wai.ong11@alumni.imprtial.ac.uk",
+    author_email="wai.ong11@alumni.imperial.ac.uk",
     description="Various implementations of recommender systems",
     long_description=long_description,
     long_description_content_type="text/markdown",

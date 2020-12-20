@@ -1,11 +1,12 @@
-FROM tensorflow/tensorflow:latest-py3
+FROM tensorflow/tensorflow:latest as base
 
+RUN  apt-get -y update && apt install -y git libpq-dev
+
+FROM base
 
 ADD . /opt/recommender/
 WORKDIR /opt/recommender
-RUN  apt-get -y update && \
-    apt install -y git libpq-dev && \
-    pip install .
+RUN  pip install .
 RUN chmod +x /opt/recommender/run.sh
 WORKDIR /opt/recommender
 

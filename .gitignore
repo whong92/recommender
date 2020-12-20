@@ -1,7 +1,6 @@
 data/*
 models/*
 gcp/*
-deploy/*
 !data/READme.md
 !models/READme.md
 *.idea

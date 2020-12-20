@@ -108,6 +108,7 @@ class ALSRecommenderService(BasicRecommenderService):
     def user_update(self, update_req: dict):
 
         rows, cols, vals = get_update_request_data(update_req)
+        if len(rows) == 0: return
         N = np.max(rows) + 1
         M = np.max(cols) + 1
         unique_rows = np.unique(rows)
@@ -150,6 +151,7 @@ class MFAsymRecService(BasicRecommenderService):
     def user_update(self, update_req: dict):
 
         rows, cols, vals = get_update_request_data(update_req)
+        if len(rows) == 0: return
         N = np.max(rows) + 1
         M = np.max(cols) + 1
 
