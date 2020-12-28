@@ -1,6 +1,19 @@
+import tensorflow as tf
+
+# need to do this otherwise libcusolver is not happy? who knows
+gpus = tf.config.experimental.list_physical_devices('GPU')
+if gpus:
+  try:
+    # Currently, memory growth needs to be the same across GPUs
+    for gpu in gpus: tf.config.experimental.set_memory_growth(gpu, True)
+    logical_gpus = tf.config.experimental.list_logical_devices('GPU')
+    print(len(gpus), "Physical GPUs,", len(logical_gpus), "Logical GPUs")
+  except RuntimeError as e:
+    # Memory growth must be set before GPUs have been initialized
+    print(e)
+
 import numpy as np
 import pandas as pd
-import tensorflow as tf
 from keras.utils import generic_utils
 from scipy import sparse as sps
 from tqdm import tqdm
@@ -235,15 +248,13 @@ def als_update_cache(als: Model, alsc: Model, Yname, Y2name, lamb=1e-06):
 def als_initizalize(als: Model, random_seed=42):
 
     X = als.get_layer('X').trainable_weights[0]
-    Y = als.get_layer('X').trainable_weights[0]
+    Y = als.get_layer('Y').trainable_weights[0]
     N, K = X.shape
     M, K = Y.shape
 
     np.random.seed(random_seed)
     Xinit = np.random.normal(0, 1 / np.sqrt(K), size=(N, K))
     Yinit = np.random.normal(0, 1 / np.sqrt(K), size=(M, K))
-    Xinit = np.append(Xinit, np.zeros(shape=(1, K)), axis=0)
-    Yinit = np.append(Yinit, np.zeros(shape=(1, K)), axis=0)
 
     als.get_layer('X').set_weights([Xinit])
     als.get_layer('Y').set_weights([Yinit])
@@ -373,7 +384,15 @@ class ALSUpdateAlgo(UpdateAlgo):
 
         run_als_epoch(als, alsc, 'X', 'Y', 'Y2', data, alpha, prefix="X")
 
-        pass
+    def make_update_data(self, data):
+
+        rows, cols, vals = data
+        if len(rows) == 0: return []
+        N = np.max(rows) + 1
+        M = np.max(cols) + 1
+        unique_rows = np.unique(rows)
+        Uupdate = sps.csr_matrix((vals, (rows, cols)), shape=(N, M))
+        return ALS_data_iter_preset(Uupdate, rows=unique_rows)
 
 class ALSEnv(Environment, ALSTrainer, ALSUpdateAlgo, SimpleMFRecAlgo, AUCEval):
 
@@ -408,8 +427,8 @@ if __name__=="__main__":
     M = d.M
     N = d.N
 
-    train_data_X = ALS_data_iter_preset(Utrain, batchsize=200)
-    train_data_Y = ALS_data_iter_preset(sps.csr_matrix(Utrain.T), batchsize=200)
+    train_data_X = ALS_data_iter_preset(Utrain, batchsize=100)
+    train_data_Y = ALS_data_iter_preset(sps.csr_matrix(Utrain.T), batchsize=100)
 
     max_num_ratings = 50
     num_ratings = Utrain.getnnz(axis=1)

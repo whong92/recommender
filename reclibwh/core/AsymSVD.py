@@ -54,10 +54,24 @@ class AsymSVDCachedUpdater(UpdateAlgo):
             ui = X['uj_in']
 
             Qnew = self._predict_X(ui, bjs, rs)
-            Q = self.__model_main.get_layer('Q').get_weights()[0]
-            Q[us] = np.squeeze(Qnew)
-            self.__model_main.get_layer('Q').set_weights([np.squeeze(Q)])
+            Q = self.__model_main.get_layer('Q').trainable_weights[0]
+            Q.scatter_nd_update(np.expand_dims(us, axis=1), Qnew[:, 0, :])
+
             progbar.add(1)
+
+    def make_update_data(self, data):
+
+        rows, cols, vals = data
+        if len(rows) == 0: return []
+        N = np.max(rows) + 1
+        M = np.max(cols) + 1
+
+        Uupdate = sps.csr_matrix((vals, (rows, cols)), shape=(N, M))
+        df_update = pd.DataFrame({'user': rows, 'item': cols, 'rating': vals})
+
+        rnorm = self.__env['data']['rnorm']
+        Bi = self.__env['data']['Bi']
+        return MFAsym_data_iter_preset(df_update, Uupdate, rnorm=rnorm, Bi=Bi)
 
 class AsymSVDCachedAlgo(Algorithm):
 

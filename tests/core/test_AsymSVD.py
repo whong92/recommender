@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 from reclibwh.utils.utils import mean_nnz
 import scipy.sparse as sps
-from reclibwh.utils.testutils import refresh_dir
+from reclibwh.utils.test_utils import refresh_dir
 
 class TestAsymSVD(unittest.TestCase):
 
@@ -16,7 +16,7 @@ class TestAsymSVD(unittest.TestCase):
         self.data = ExplicitDataDummy()
         self.save_path = "tests/models"
 
-    def test_asym_svd_train(self):
+    def _test_asym_svd_train(self):
 
         d = self.data
         df_train, df_test = d.make_training_datasets(dtype='df')
@@ -70,7 +70,7 @@ class TestAsymSVD(unittest.TestCase):
 
         asvdc_data = MFAsym_data_iter_preset(
             pd.DataFrame({'user': np.arange(d.N), 'item': np.zeros(shape=(d.N,)), 'rating': np.zeros(shape=(d.N,))}),
-            Utrain, rnorm=rnorm
+            Utrain, rnorm=rnorm, remove_rated_items=False
         )
         env_varsc = {'data': {'asvd': m, 'train_data': asvdc_data}, 'data_conf': data_conf}
         envc = AsymSVDCachedEnv(save_path, mc, None, env_varsc)
@@ -101,7 +101,7 @@ class TestAsymSVD(unittest.TestCase):
         rows = np.array(df_update['user'])
         cols = np.array(df_update['item'])  # update_users
         Uupdate = sps.csr_matrix((vals, (rows, cols)), shape=(d.N + 1, d.M))
-        data_update = MFAsym_data_iter_preset(df_update, Uupdate, rnorm=rnorm, Bi=Bi)
+        data_update = MFAsym_data_iter_preset(df_update, Uupdate, rnorm=rnorm, Bi=Bi, remove_rated_items=False)
         envc.update_user(data_update)
 
         # check outputs match

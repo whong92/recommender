@@ -34,6 +34,10 @@ class UpdateAlgo(ABC):
     def update_user(self, **kwargs):
         raise NotImplementedError
 
+    @abstractmethod
+    def make_update_data(self, data):
+        raise NotImplementedError
+
 class UpdateAlgoStub(UpdateAlgo):
 
     def update_user(self, **kwargs):

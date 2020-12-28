@@ -5,7 +5,7 @@ import os
 import numpy as np
 from reclibwh.core.LMF import LMFEnv
 from reclibwh.data.PresetIterators import LMF_data_iter_preset, AUC_data_iter_preset
-from reclibwh.utils.testutils import refresh_dir
+from reclibwh.utils.test_utils import refresh_dir
 
 class TestLMF(unittest.TestCase):
 

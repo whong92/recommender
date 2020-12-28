@@ -3,6 +3,7 @@ from reclibwh.core.ALS import ALSEnv
 from reclibwh.core.AsymSVD import AsymSVDCachedEnv
 from reclibwh.data.PresetIterators import ALS_data_iter_preset, MFAsym_data_iter_preset
 from reclibwh.core.RecAlgos import RecAlgo
+from reclibwh.core.Ensemble import EnsembleEnv
 import numpy as np
 import pandas as pd
 import scipy.sparse as sps
@@ -10,6 +11,7 @@ import scipy.sparse as sps
 from abc import ABC, abstractmethod
 from reclibwh.utils.ItemMetadata import ExplicitData
 from typing import Optional
+import os, json
 
 def filter_recommendations(recs, update_req, lim=200):
 
@@ -64,6 +66,40 @@ def get_recommend_request_data(update_req: dict):
 
     return list([k for k in update_req.keys()])
 
+# some simple factory methods
+def make_asymsvd_from_config(save_path, d: ExplicitData):
+
+    item_mean_ratings = np.array(d.get_item_mean_ratings(None))
+    Bi = np.array(item_mean_ratings)
+
+    data_conf = {"M": d.M, "N": d.N}
+    mc = initialize_from_json(data_conf=data_conf, config_path="SVD_asym_cached.json.template")
+
+    env_varsc = {
+        'data_conf': data_conf,
+        'data': {'rnorm': {'loc': 0.0, 'scale': 5.0}, 'Bi': Bi}
+    }
+    return AsymSVDCachedEnv(save_path, mc, None, env_varsc)
+
+def make_als_from_config(save_path, d: ExplicitData):
+
+    data_conf = {"M": d.M, "N": d.N}
+    env_vars = {
+        "save_fmt": STANDARD_KERAS_SAVE_FMT,
+        "data_conf": data_conf, "data": {}
+    }
+    m = initialize_from_json(data_conf=data_conf, config_path="ALS.json.template")
+    return ALSEnv(save_path, m, d, env_vars)
+
+def make_ensemble_from_configs(configs, data: ExplicitData):
+    envs = []
+    for config in configs:
+        env_class = config['env_class']
+        if env_class == 'AsymSVDCachedEnv': envs.append(make_asymsvd_from_config(config['save_path'], data))
+        if env_class == 'ALSEnv': envs.append(make_als_from_config(config['save_path'], data))
+
+    return envs
+
 class BasicRecommenderService(ABC):
 
     def __init__(self, env: Optional[RecAlgo] = None):
@@ -93,28 +129,13 @@ class ALSRecommenderService(BasicRecommenderService):
     def __init__(self, save_path, data: ExplicitData):
         super(ALSRecommenderService, self).__init__(None)
         self.save_path = save_path
-
-        # just dummy variables to kick start the environment
-        data_conf= {"M": data.M+1, "N": data.N+1}
-        env_vars = {
-            "save_fmt": STANDARD_KERAS_SAVE_FMT,
-            "data_conf": data_conf, "data": {}
-        }
-
-        m = initialize_from_json(data_conf=data_conf, config_path="ALS.json.template")
-        self.env = ALSEnv(save_path, m, data, env_vars)
+        self.env = make_als_from_config(save_path, data)
         self.env.predict(np.array([0]), np.array([0])) # to make sure environment initialized
 
     def user_update(self, update_req: dict):
 
         rows, cols, vals = get_update_request_data(update_req)
-        if len(rows) == 0: return
-        N = np.max(rows) + 1
-        M = np.max(cols) + 1
-        unique_rows = np.unique(rows)
-        Uupdate = sps.csr_matrix((vals, (rows, cols)), shape=(N, M))
-        update_data = ALS_data_iter_preset(Uupdate, rows=unique_rows)
-
+        update_data = self.env.make_update_data((rows, cols, vals))
         self.env.update_user(update_data)
 
     def item_similar_to(self, *args, **kwargs):
@@ -137,30 +158,13 @@ class MFAsymRecService(BasicRecommenderService):
 
         super(MFAsymRecService, self).__init__(None)
         self.save_path = save_path
-
-        # just dummy variables to kick start the environment
-        data_conf = {"M": data.M, "N": data.N}
-        mc = initialize_from_json(data_conf=data_conf, config_path="SVD_asym_cached.json.template")
-        item_mean_ratings = np.array(data.get_item_mean_ratings(None))
-        self.Bi = np.array(item_mean_ratings)
-        env_varsc = {'data': {}, 'data_conf': data_conf}
-
-        self.env = AsymSVDCachedEnv(save_path, mc, None, env_varsc)
+        self.env = make_asymsvd_from_config(save_path, data)
         self.env.predict(np.array([0]), np.array([0]))  # to make sure environment initialized
 
     def user_update(self, update_req: dict):
 
         rows, cols, vals = get_update_request_data(update_req)
-        if len(rows) == 0: return
-        N = np.max(rows) + 1
-        M = np.max(cols) + 1
-
-        Uupdate = sps.csr_matrix((vals, (rows, cols)), shape=(N, M))
-        df_update = pd.DataFrame({'user': rows, 'item': cols, 'rating': vals})
-        rnorm = {'loc': 0.0, 'scale': 5.0}
-        Bi = self.Bi
-        update_data = MFAsym_data_iter_preset(df_update, Uupdate, rnorm=rnorm, Bi=Bi)
-
+        update_data = self.env.make_update_data((rows, cols, vals))
         self.env.update_user(update_data)
 
     def item_similar_to(self, *args, **kwargs):
@@ -176,5 +180,25 @@ class MFAsymRecService(BasicRecommenderService):
         # if avg_items: s = np.mean(s, axis=0, keepdims=True)
         #
         # return np.argsort(s)[:, ::-1], np.sort(s)[:, ::-1]
+
+        raise NotImplementedError
+
+class ALSMFEnsembleService(BasicRecommenderService):
+
+    def __init__(self, save_path, data: ExplicitData):
+
+        super(ALSMFEnsembleService, self).__init__(None)
+
+        with open(os.path.join(save_path, "config.json")) as fp: config = json.load(fp)
+        envs = make_ensemble_from_configs(config, data)
+        self.env = EnsembleEnv(None, envs, None, {'data_conf': {"M": data.M, "N": data.N}})
+
+    def user_update(self, update_req: dict):
+
+        rows, cols, vals = get_update_request_data(update_req)
+        update_data = self.env.make_update_data((rows, cols, vals))
+        self.env.update_user(update_data)
+
+    def item_similar_to(self, *args, **kwargs):
 
         raise NotImplementedError

@@ -4,7 +4,7 @@ tf.config.experimental.set_visible_devices([], 'GPU')
 my_devices = tf.config.experimental.list_physical_devices(device_type='CPU')
 tf.config.experimental.set_visible_devices(devices= my_devices, device_type='CPU')
 
-from .RecommenderService import MFAsymRecService, sanitize_update_req_data, ALSRecommenderService
+from .RecommenderService import MFAsymRecService, sanitize_update_req_data, ALSRecommenderService, ALSMFEnsembleService
 from ..utils.ItemMetadata import ExplicitDataFromCSV
 from flask import Flask, Blueprint, request, app, current_app, Response, jsonify
 from flask_cors import CORS
@@ -49,9 +49,10 @@ def create_app(model_path, data_path):
     app = Flask(__name__)
     app.register_blueprint(rec_blueprint)
     CORS(app)
-    data = ExplicitDataFromCSV(True, data_folder=data_path)
+    data = ExplicitDataFromCSV(True, data_folder=data_path, load_ratings=False)
     # app.stuff = {'rec_context': MFAsymRecService(save_path=model_path, data=data)}
-    app.stuff = {'rec_context': ALSRecommenderService(save_path=model_path, data=data)}
+    # app.stuff = {'rec_context': ALSRecommenderService(save_path=model_path, data=data)}
+    app.stuff = {'rec_context': ALSMFEnsembleService(save_path=model_path, data=data)}
     return app
 
 if __name__ == "__main__":

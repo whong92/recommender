@@ -276,27 +276,28 @@ class ExplicitDataFromCSV(ExplicitData):
         self.stats = ExplicitDataFromCSV.calc_rating_stats(self.ratings)
 
     def from_saved_csv(self, ratings_csv, split_csv, user_map_csv, item_map_csv, md_csv, stats_csv):
-        self.ratings = pd.read_csv(ratings_csv, index_col=None)[['rating', 'item', 'user']]
-        self.ratings_split  = pd.read_csv(split_csv, index_col=None)
-        assert len(self.ratings) == len(self.ratings_split)
-        self.ratings['split'] = self.ratings_split
-        self.ratings.set_index(['user', 'split'], drop=False, inplace=True)
+        if ratings_csv is not None:
+            self.ratings = pd.read_csv(ratings_csv, index_col=None)[['rating', 'item', 'user']]
+            self.ratings_split  = pd.read_csv(split_csv, index_col=None)
+            assert len(self.ratings) == len(self.ratings_split)
+            self.ratings['split'] = self.ratings_split
+            self.ratings.set_index(['user', 'split'], drop=False, inplace=True)
         self.user_map = pd.read_csv(user_map_csv, index_col='user_cat')
         self.item_map = pd.read_csv(item_map_csv, index_col='item_cat')
         self.md_df = pd.read_csv(md_csv, index_col='item_cat')
         self.stats = pd.read_csv(stats_csv, index_col='item')
 
-    def from_standard_dataset(self, data_folder):
+    def from_standard_dataset(self, data_folder, load_ratings=True):
         self.from_saved_csv(
-            ratings_csv=os.path.join(data_folder, 'ratings_sanitized.csv'),
-            split_csv=os.path.join(data_folder, 'ratings_split.csv'),
+            ratings_csv=os.path.join(data_folder, 'ratings_sanitized.csv') if load_ratings else None,
+            split_csv=os.path.join(data_folder, 'ratings_split.csv') if load_ratings else None,
             user_map_csv = os.path.join(data_folder, 'user_map.csv'),
             item_map_csv = os.path.join(data_folder, 'item_map.csv'),
             md_csv = os.path.join(data_folder, 'metadata.csv'),
             stats_csv = os.path.join(data_folder, 'stats.csv'),
         )
 
-    def __init__(self, from_saved=False, normalize=None, **kwargs):
+    def __init__(self, from_saved=False, **kwargs):
         """
         The user/item columns in all stored tables  in this class are in terms of the
         sanitized user/items (0-M/0-N) respectively. self.item_map and self.user_map
