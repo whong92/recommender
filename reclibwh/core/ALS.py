@@ -25,7 +25,7 @@ from .Models import STANDARD_KERAS_SAVE_FMT, initialize_from_json, model_restore
 from datetime import datetime
 from ..data.iterators import EpochIterator
 from .EvalProto import EvalCallback, AUCEval
-from .RecAlgos import SimpleMFRecAlgo
+from .RecAlgos import SimpleMFRecAlgo, SimpleMFSimAlgo
 from .Environment import Environment, Algorithm, UpdateAlgo
 from reclibwh.data.PresetIterators import ALS_data_iter_preset, AUC_data_iter_preset
 from reclibwh.utils.ItemMetadata import ExplicitDataFromCSV
@@ -394,7 +394,7 @@ class ALSUpdateAlgo(UpdateAlgo):
         Uupdate = sps.csr_matrix((vals, (rows, cols)), shape=(N, M))
         return ALS_data_iter_preset(Uupdate, rows=unique_rows)
 
-class ALSEnv(Environment, ALSTrainer, ALSUpdateAlgo, SimpleMFRecAlgo, AUCEval):
+class ALSEnv(Environment, ALSTrainer, ALSUpdateAlgo, SimpleMFRecAlgo, AUCEval, SimpleMFSimAlgo):
 
     def __init__(
             self, path, model, data, state,
@@ -409,6 +409,7 @@ class ALSEnv(Environment, ALSTrainer, ALSUpdateAlgo, SimpleMFRecAlgo, AUCEval):
         SimpleMFRecAlgo.__init__(self, self, self, output_key=0)
         AUCEval.__init__(self, self, self, med_score)
         ALSUpdateAlgo.__init__(self, self, self)
+        SimpleMFSimAlgo.__init__(self, self, output_emb='Y')
 
 if __name__=="__main__":
 
@@ -454,4 +455,4 @@ if __name__=="__main__":
 
     m = initialize_from_json(data_conf={"M": M + 1, "N": N + 1}, config_path="ALS.json.template")
     alsenv = ALSEnv(save_path, m, data, env_vars, epochs=15, lamb=0.01)
-    alsenv.fit()
+    alsenv.similar(np.array([2]))

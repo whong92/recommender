@@ -1,7 +1,8 @@
 from abc import ABC, abstractmethod
-from .Environment import RecAlgo, Environment, Algorithm
+from .Environment import RecAlgo, Environment, Algorithm, SimAlgo
 import numpy as np
 from ..data.iterators import AddBias, AddRatedItems, link, Normalizer
+import tensorflow as tf
 
 class SimpleMFRecAlgo(RecAlgo):
 
@@ -29,6 +30,47 @@ class SimpleMFRecAlgo(RecAlgo):
         rhats = rhats.reshape(nu, -1)
 
         return np.argsort(rhats)[:, ::-1], np.sort(rhats)[:, ::-1]
+
+@tf.function
+def replacenan(t):
+    return tf.where(tf.math.is_nan(t), tf.zeros_like(t), t)
+
+@tf.function
+def cosine_similarity_tf(x: tf.Tensor, y: tf.Tensor):
+    """
+    :param x: N x k tensor
+    :param y: M x k tensor
+    :return: N x M similarity tensor
+    """
+    x = tf.expand_dims(x, axis=1)
+    y = tf.expand_dims(y, axis=0)
+    x, _ = tf.linalg.normalize(x, axis=-1, ord=2)
+    y, _ = tf.linalg.normalize(y, axis=-1, ord=2)
+    x = replacenan(x)
+    y = replacenan(y)
+    return tf.reduce_sum(tf.multiply(x, y), axis=-1)
+
+class SimpleMFSimAlgo(SimAlgo):
+
+    def __init__(self, env: Environment, output_emb='X', model_num=0):
+
+        self.__env = env
+        self.__output_emb = output_emb
+        self.__model_num = model_num
+
+    def similar(self, item: np.array):
+
+        self.__model = self.__env['model'][self.__model_num]
+        M = self.__env.get_state()['data_conf']['M']
+
+        assert item.ndim == 1
+        item = np.expand_dims(item, axis=0)
+        X = self.__model.get_layer(self.__output_emb).trainable_weights[0]
+        x = tf.gather_nd(X, tf.convert_to_tensor(item))
+        sims = cosine_similarity_tf(x, X)
+        sims = sims.numpy()[:,:M]
+
+        return np.argsort(sims)[:, ::-1], np.sort(sims)[:, ::-1]
 
 class MFAsymRecAlgo(RecAlgo):
 

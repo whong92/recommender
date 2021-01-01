@@ -66,8 +66,16 @@ def get_recommend_request_data(update_req: dict):
 
     return list([k for k in update_req.keys()])
 
+def get_item_request_data(item_req: dict):
+    return item_req['items']
+
+def format_similarity(items: np.array, sim_items: np.array, sims: np.array, lim=200):
+    return {
+        items[i] : { 'sim_items': sim_items[i, 1:lim+1].tolist(), 'sims': sims[i, 1:lim+1].tolist() } for i in range(len(items))
+    }
+
 # some simple factory methods
-def make_asymsvd_from_config(save_path, d: ExplicitData):
+def make_asymsvd_from_config(save_path, d: ExplicitData) -> AsymSVDCachedEnv:
 
     item_mean_ratings = np.array(d.get_item_mean_ratings(None))
     Bi = np.array(item_mean_ratings)
@@ -81,7 +89,7 @@ def make_asymsvd_from_config(save_path, d: ExplicitData):
     }
     return AsymSVDCachedEnv(save_path, mc, None, env_varsc)
 
-def make_als_from_config(save_path, d: ExplicitData):
+def make_als_from_config(save_path, d: ExplicitData) -> ALSEnv:
 
     data_conf = {"M": d.M, "N": d.N}
     env_vars = {
@@ -91,7 +99,7 @@ def make_als_from_config(save_path, d: ExplicitData):
     m = initialize_from_json(data_conf=data_conf, config_path="ALS.json.template")
     return ALSEnv(save_path, m, d, env_vars)
 
-def make_ensemble_from_configs(configs, data: ExplicitData):
+def make_ensemble_from_configs(configs, data: ExplicitData) -> list:
     envs = []
     for config in configs:
         env_class = config['env_class']
@@ -109,10 +117,6 @@ class BasicRecommenderService(ABC):
     def user_update(self, update_req: dict):
         pass
 
-    @abstractmethod
-    def item_similar_to(self, *args, **kwargs):
-        pass
-
     def user_recommend(self, users: list):
         users = np.array(users)
         items, scores = self.env.recommend(users)
@@ -122,6 +126,11 @@ class BasicRecommenderService(ABC):
         self.user_update(update_req)
         recs = self.user_recommend(get_recommend_request_data(update_req))
         return filter_recommendations(recs, update_req)
+
+    def item_similar_to(self, item_req):
+        items = get_item_request_data(item_req)
+        sim_items, sims = self.env.similar(np.array(items))
+        return format_similarity(items, sim_items, sims)
 
 
 class ALSRecommenderService(BasicRecommenderService):
@@ -137,19 +146,6 @@ class ALSRecommenderService(BasicRecommenderService):
         rows, cols, vals = get_update_request_data(update_req)
         update_data = self.env.make_update_data((rows, cols, vals))
         self.env.update_user(update_data)
-
-    def item_similar_to(self, *args, **kwargs):
-
-        # old implementation
-        # i_in = np.array(i_in)
-        # y = self.als.Y[i_in]
-        # Y = self.als.Y
-        # s = cosine_similarity(y, Y)
-        # if avg_items: s = np.mean(s, axis=0, keepdims=True)
-        #
-        # return np.argsort(s)[:, ::-1], np.sort(s)[:, ::-1]
-
-        raise NotImplementedError
 
 
 class MFAsymRecService(BasicRecommenderService):
@@ -167,22 +163,6 @@ class MFAsymRecService(BasicRecommenderService):
         update_data = self.env.make_update_data((rows, cols, vals))
         self.env.update_user(update_data)
 
-    def item_similar_to(self, *args, **kwargs):
-
-        # old implementation
-        # i_in = np.array(i_in)
-        # p = self.predict(
-        #     u_in=np.tile(np.array([0], dtype=np.int32), self.config['n_items']),
-        #     i_in=np.arange(0, self.config['n_items'], dtype=np.int32))
-        # q_in = p['p'][i_in]
-        # q = p['p']
-        # s = cosine_similarity(q_in, q)
-        # if avg_items: s = np.mean(s, axis=0, keepdims=True)
-        #
-        # return np.argsort(s)[:, ::-1], np.sort(s)[:, ::-1]
-
-        raise NotImplementedError
-
 class ALSMFEnsembleService(BasicRecommenderService):
 
     def __init__(self, save_path, data: ExplicitData):
@@ -191,6 +171,7 @@ class ALSMFEnsembleService(BasicRecommenderService):
 
         with open(os.path.join(save_path, "config.json")) as fp: config = json.load(fp)
         envs = make_ensemble_from_configs(config, data)
+        for env in envs: env.predict(np.array([0]), np.array([0]))
         self.env = EnsembleEnv(None, envs, None, {'data_conf': {"M": data.M, "N": data.N}})
 
     def user_update(self, update_req: dict):
@@ -198,7 +179,3 @@ class ALSMFEnsembleService(BasicRecommenderService):
         rows, cols, vals = get_update_request_data(update_req)
         update_data = self.env.make_update_data((rows, cols, vals))
         self.env.update_user(update_data)
-
-    def item_similar_to(self, *args, **kwargs):
-
-        raise NotImplementedError

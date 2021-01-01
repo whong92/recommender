@@ -9,7 +9,7 @@ from ..utils.ItemMetadata import ExplicitDataFromCSV, ExplicitDataDummy
 from .Models import STANDARD_KERAS_SAVE_FMT, initialize_from_json
 from .EvalProto import EvalProto, EvalCallback, AUCEval
 from .Environment import Algorithm, UpdateAlgo, Environment
-from .RecAlgos import MFAsymRecAlgo, SimpleMFRecAlgo
+from .RecAlgos import MFAsymRecAlgo, SimpleMFRecAlgo, SimpleMFSimAlgo
 from .MatrixFactor import KerasModelSGD
 from ..data.PresetIterators import MFAsym_data_iter_preset, AUC_data_iter_preset, MFAsym_data_tf_dataset
 import pandas as pd
@@ -138,7 +138,7 @@ class AsymSVDCachedAlgo(Algorithm):
         self._import_ASVD_weights(asvd, train_data)
         self.__env_save()
 
-class AsymSVDEnv(Environment, AsymSVDAlgo, MFAsymRecAlgo, AUCEval):
+class AsymSVDEnv(Environment, AsymSVDAlgo, MFAsymRecAlgo, AUCEval, SimpleMFSimAlgo):
 
     def __init__(
             self, path, model, data, state,
@@ -157,7 +157,7 @@ class AsymSVDCachedEnv(
     AsymSVDCachedAlgo,
     AsymSVDCachedUpdater,
     SimpleMFRecAlgo,
-    AUCEval
+    AUCEval, SimpleMFSimAlgo
 ):
 
     def __init__(
@@ -168,6 +168,7 @@ class AsymSVDCachedEnv(
         AsymSVDCachedAlgo.__init__(self, self, self) # <--- this is silly, fix!
         SimpleMFRecAlgo.__init__(self, self, self, output_key=0)
         AUCEval.__init__(self, self, self, med_score)
+        SimpleMFSimAlgo.__init__(self, self, output_emb='P', model_num=1)
 
 if __name__=="__main__":
 

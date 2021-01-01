@@ -4,7 +4,7 @@ from ..utils.ItemMetadata import ExplicitDataFromCSV
 from reclibwh.core.AsymSVD import AsymSVDCachedEnv
 from reclibwh.core.Models import STANDARD_KERAS_SAVE_FMT, initialize_from_json
 from reclibwh.core.EvalProto import AUCEval
-from reclibwh.core.Environment import UpdateAlgo, Environment, RecAlgo
+from reclibwh.core.Environment import UpdateAlgo, Environment, RecAlgo, SimAlgo
 from reclibwh.core.ALS import ALSEnv
 from ..data.PresetIterators import AUC_data_iter_preset
 
@@ -48,11 +48,31 @@ class EnsembleRecAlgo(RecAlgo):
                 p[u] = np.multiply(p[u], rec_p[np.argsort(rec_ap)])
         return np.argsort(p)[:, ::-1], np.sort(p)[:, ::-1]
 
+class EnsembleSimAlgo(SimAlgo):
+
+    def __init__(self, env: Environment):
+        UpdateAlgo.__init__(self)
+        self.__env = env
+        self.__models = None
+
+    def __initialize(self):
+        self.__models = self.__env['model']
+
+    def similar(self, item):
+        self.__initialize()
+        M = self.__env['data_conf']['M']
+        p = np.ones(shape=(len(item), M), dtype=float)
+        for model in self.__models:
+            sim_aps, sim_ps = model.similar(item)
+            for i, (sim_ap, sim_p) in enumerate(zip(sim_aps, sim_ps)):
+                p[i] = np.multiply(p[i], sim_p[np.argsort(sim_ap)])
+        return np.argsort(p)[:, ::-1], np.sort(p)[:, ::-1]
+
 class EnsembleEnv(
     Environment,
     EnsembleUpdateAlgo,
     EnsembleRecAlgo,
-    AUCEval
+    AUCEval, EnsembleSimAlgo
 ):
 
     def __init__(
@@ -62,6 +82,7 @@ class EnsembleEnv(
         EnsembleUpdateAlgo.__init__(self, self) # <--- this is silly, fix!
         EnsembleRecAlgo.__init__(self, self)
         AUCEval.__init__(self, self, self, med_score)
+        EnsembleSimAlgo.__init__(self, self)
 
 if __name__=="__main__":
 

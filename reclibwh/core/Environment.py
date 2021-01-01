@@ -17,6 +17,12 @@ class RecAlgo(ABC):
     def recommend(self, user):
         pass
 
+class SimAlgo(ABC):
+
+    @abstractmethod
+    def similar(self, item):
+        pass
+
 class Algorithm(ABC):
 
     @abstractmethod
